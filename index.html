@@ -315,6 +315,23 @@
       100% { transform: translateY(-180px) scale(0.85); opacity: 0; }
     }
 
+    /* ── YouTube IFrame Player ── */
+    /* The YouTube API replaces #yt-player-mount with an <iframe>.
+       Both the div and the resulting iframe must fill the wrapper. */
+    #yt-player-mount {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      background: #000;
+    }
+    #yt-player-mount iframe {
+      width: 100%  !important;
+      height: 100% !important;
+      display: block;
+      border: none;
+    }
+
     /* ── Sync Flash Indicator ── */
     .sync-indicator {
       position: absolute;
@@ -1014,9 +1031,9 @@
     <!-- ── Video Player ── -->
     <div class="video-wrapper" ref="videoWrapper">
 
-      <!-- Native HTML5 video element -->
+      <!-- ① Native HTML5 <video> — for direct .mp4 / .webm / .mkv / HLS URLs -->
       <video
-        v-show="videoSrc"
+        v-show="videoType === 'native' && videoSrc"
         ref="videoEl"
         :src="videoSrc"
         controls
@@ -1026,8 +1043,16 @@
         @seeked="onSeeked"
       ></video>
 
-      <!-- Empty / placeholder state -->
-      <div class="video-placeholder" v-if="!videoSrc">
+      <!-- ② YouTube IFrame player mount point
+           The YouTube IFrame API replaces this div with an <iframe>.
+           v-show keeps it in the DOM so the API can always reference it. -->
+      <div
+        id="yt-player-mount"
+        v-show="videoType === 'youtube' && ytVideoId"
+      ></div>
+
+      <!-- Empty / placeholder state — shown only when no source is loaded -->
+      <div class="video-placeholder" v-if="!videoSrc && !ytVideoId">
         <div class="placeholder-icon">
           <svg width="72" height="72" viewBox="0 0 24 24" fill="none"
                stroke="currentColor" stroke-width="0.8" stroke-linecap="round">
@@ -1064,7 +1089,7 @@
           class="field"
           v-model="urlInput"
           type="url"
-          placeholder="https://example.com/film.mp4  ·  stream.m3u8  ·  clip.webm"
+          placeholder="YouTube URL  ·  https://example.com/film.mp4  ·  .webm  ·  .m3u8"
           @keydown.enter="loadVideo"
         />
         <button class="btn btn-ghost" @click="loadVideo">Load</button>
@@ -1339,6 +1364,37 @@ function colorOf(username) {
   return AVATAR_PALETTE[djb2(username) % AVATAR_PALETTE.length];
 }
 
+/**
+ * Detect YouTube URLs and extract the 11-character video ID.
+ * Handles: youtube.com/watch?v=  ·  youtu.be/  ·  youtube.com/shorts/  ·  /embed/
+ * Returns { type: 'youtube', id } or { type: 'native' }
+ */
+function parseVideoUrl(url) {
+  const yt = url.match(
+    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
+  );
+  if (yt) return { type: 'youtube', id: yt[1] };
+  return { type: 'native' };
+}
+
+/**
+ * Lazily load the YouTube IFrame Player API script once.
+ * Resolves immediately if YT is already on the page.
+ */
+function loadYouTubeAPI() {
+  return new Promise((resolve) => {
+    if (window.YT && window.YT.Player) { resolve(); return; }
+    // Chain onto any existing ready callback (e.g. another call in-flight)
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { if (prev) prev(); resolve(); };
+    if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+      const s = document.createElement('script');
+      s.src = 'https://www.youtube.com/iframe_api';
+      document.head.appendChild(s);
+    }
+  });
+}
+
 let _uid = 0;
 const uid = () => ++_uid;
 
@@ -1383,11 +1439,20 @@ createApp({
     const videoTitle   = ref('');
     const syncPulse    = ref(false);
 
+    // 'native' = direct file URL  |  'youtube' = YouTube IFrame API
+    const videoType = ref('native');
+    const ytVideoId = ref('');       // extracted YouTube video ID
+
+    // YouTube IFrame Player instance (not reactive — plain JS object)
+    let ytPlayer = null;
+
     // Prevents our own video event handlers from re-broadcasting
     // when we programmatically apply a remote command
-    let remoteApply   = false;
-    let seekTimer     = null;
-    let syncPulseTimer = null;
+    let remoteApply       = false;
+    // Prevents video_source broadcast loop when peer auto-loads a video
+    let remoteSourceApply = false;
+    let seekTimer         = null;
+    let syncPulseTimer    = null;
 
     // ────────────────────────────────────────────────────────
     //  PRESENCE / PARTICIPANTS
@@ -1552,6 +1617,21 @@ createApp({
         spawnEmoji(payload.emoji);
       });
 
+      // ── Broadcast: video_source ───────────────────────────
+      // Fired when the Host loads a new video.
+      // Peers receive it and auto-load the same video so everyone is watching
+      // the same content without manually pasting the URL.
+      channel.on('broadcast', { event: 'video_source' }, ({ payload }) => {
+        if (isHost.value) return; // host never echoes to itself but guard anyway
+        remoteSourceApply = true;
+        // Reconstruct a full URL for the input field
+        urlInput.value = payload.type === 'youtube'
+          ? `https://www.youtube.com/watch?v=${payload.id}`
+          : (payload.url || '');
+        loadVideo().finally(() => { remoteSourceApply = false; });
+        sysMsg(`▶ Host loaded a new ${payload.type === 'youtube' ? 'YouTube ' : ''}video`);
+      });
+
       // ── Subscribe then begin presence tracking ───────────
       await channel.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
@@ -1602,40 +1682,63 @@ createApp({
       }, SEEK_DEBOUNCE_MS);
     }
 
-    /** Force-sync all peers to current playback position (manual Host action) */
+    /** Force-sync all peers to current playback position + video source */
     function forceSyncPeers() {
       if (!isHost.value) return;
-      const v = videoEl.value;
-      if (!v) return;
-      const action = v.paused ? 'pause' : 'play';
-      emit('playback_control', { action, ts: v.currentTime });
+
+      if (videoType.value === 'youtube' && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
+        const state  = ytPlayer.getPlayerState();
+        const action = state === YT.PlayerState.PLAYING ? 'play' : 'pause';
+        emit('playback_control', { action, ts: ytPlayer.getCurrentTime() });
+        // Also re-broadcast the video source so late-joining peers load the video
+        if (ytVideoId.value) emit('video_source', { type: 'youtube', id: ytVideoId.value });
+      } else {
+        const v = videoEl.value;
+        if (!v) return;
+        emit('playback_control', { action: v.paused ? 'pause' : 'play', ts: v.currentTime });
+        if (videoSrc.value) emit('video_source', { type: 'native', url: videoSrc.value });
+      }
       toast('Sync broadcast sent to all viewers');
     }
 
-    // ── Apply a remote playback command (peers only, never fired on host) ──
+    // ── Apply a remote playback command received from the Host ──
     function applyRemote({ action, ts }) {
-      const v = videoEl.value;
-      if (!v) return;
-
       flashSync();
-
       remoteApply = true;
 
-      const drift = Math.abs(v.currentTime - ts);
+      if (videoType.value === 'youtube' && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
+        // ── YouTube sync ──────────────────────────────────────
+        const currentT = ytPlayer.getCurrentTime?.() ?? 0;
+        const drift    = Math.abs(currentT - ts);
 
-      if (action === 'play') {
-        // Only seek if we're meaningfully out of sync
-        if (drift > DRIFT_THRESHOLD) v.currentTime = ts;
-        v.play().catch(() => {});
-      } else if (action === 'pause') {
-        if (drift > DRIFT_THRESHOLD) v.currentTime = ts;
-        v.pause();
-      } else if (action === 'seek') {
-        // Host explicitly scrubbed — always honour
-        v.currentTime = ts;
+        if (action === 'play') {
+          if (drift > DRIFT_THRESHOLD) ytPlayer.seekTo(ts, true);
+          ytPlayer.playVideo();
+        } else if (action === 'pause') {
+          if (drift > DRIFT_THRESHOLD) ytPlayer.seekTo(ts, true);
+          ytPlayer.pauseVideo();
+        } else if (action === 'seek') {
+          ytPlayer.seekTo(ts, true);
+        }
+
+      } else {
+        // ── Native <video> sync ───────────────────────────────
+        const v = videoEl.value;
+        if (!v) { remoteApply = false; return; }
+        const drift = Math.abs(v.currentTime - ts);
+
+        if (action === 'play') {
+          if (drift > DRIFT_THRESHOLD) v.currentTime = ts;
+          v.play().catch(() => {});
+        } else if (action === 'pause') {
+          if (drift > DRIFT_THRESHOLD) v.currentTime = ts;
+          v.pause();
+        } else if (action === 'seek') {
+          v.currentTime = ts;
+        }
       }
 
-      // Release the flag after events have settled
+      // Release guard after player events have settled
       setTimeout(() => { remoteApply = false; }, 650);
     }
 
@@ -1646,14 +1749,106 @@ createApp({
     }
 
     // ════════════════════════════════════════════════════════
-    //  VIDEO SOURCE
+    //  VIDEO SOURCE — supports native URLs and YouTube
     // ════════════════════════════════════════════════════════
-    function loadVideo() {
+
+    /**
+     * Parse the URL input and load either the native <video> or
+     * the YouTube IFrame player based on what the URL points to.
+     */
+    async function loadVideo() {
       const u = urlInput.value.trim();
       if (!u) return;
-      videoSrc.value   = u;
-      videoTitle.value = decodeURIComponent(u.split('/').pop().split('?')[0]) || u;
+
+      const parsed = parseVideoUrl(u);
+
+      if (parsed.type === 'youtube') {
+        // ── YouTube mode ─────────────────────────────────────
+        videoType.value  = 'youtube';
+        ytVideoId.value  = parsed.id;
+        videoSrc.value   = '';
+        videoTitle.value = `YouTube · ${parsed.id}`;
+
+        await nextTick(); // ensure #yt-player-mount is visible in DOM
+        await initYouTubePlayer(parsed.id);
+
+        // Fetch human-readable title via public oEmbed (no API key needed)
+        fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${parsed.id}&format=json`)
+          .then(r => r.json())
+          .then(d => { if (d.title) videoTitle.value = d.title; })
+          .catch(() => {});
+
+        // Host broadcasts the new source so all peers auto-load it
+        if (isHost.value && !remoteSourceApply) {
+          emit('video_source', { type: 'youtube', id: parsed.id });
+        }
+
+      } else {
+        // ── Native direct URL mode ────────────────────────────
+        videoType.value  = 'native';
+        ytVideoId.value  = '';
+        videoSrc.value   = u;
+        videoTitle.value = decodeURIComponent(u.split('/').pop().split('?')[0]) || u;
+
+        if (isHost.value && !remoteSourceApply) {
+          emit('video_source', { type: 'native', url: u });
+        }
+      }
+
       toast('Media source loaded');
+    }
+
+    /**
+     * Create or reuse the YouTube IFrame Player instance.
+     * If already created, just calls loadVideoById() on the existing player.
+     */
+    async function initYouTubePlayer(videoId) {
+      await loadYouTubeAPI();
+      await nextTick();
+
+      // Reuse existing player — just swap the video
+      if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
+        ytPlayer.loadVideoById(videoId);
+        return;
+      }
+
+      // Create a fresh player instance mounted on #yt-player-mount
+      ytPlayer = new YT.Player('yt-player-mount', {
+        videoId,
+        width:  '100%',
+        height: '100%',
+        playerVars: {
+          rel:             0,   // no related videos at end
+          modestbranding:  1,   // minimal YouTube branding
+          controls:        1,   // show native YouTube controls
+          autoplay:        0,
+        },
+        events: {
+          onReady() {
+            toast('YouTube ready — Host controls playback for everyone');
+          },
+          onStateChange(event) {
+            // Only the Host broadcasts state changes
+            if (!isHost.value || remoteApply) return;
+            const S = window.YT.PlayerState;
+            if (event.data === S.PLAYING) {
+              // Debounce — YouTube fires PLAYING right after a seek too
+              clearTimeout(seekTimer);
+              seekTimer = setTimeout(() => {
+                emit('playback_control', {
+                  action: 'play',
+                  ts: ytPlayer.getCurrentTime(),
+                });
+              }, 300);
+            } else if (event.data === S.PAUSED) {
+              emit('playback_control', {
+                action: 'pause',
+                ts: ytPlayer.getCurrentTime(),
+              });
+            }
+          },
+        },
+      });
     }
 
     // ════════════════════════════════════════════════════════
@@ -1835,8 +2030,9 @@ createApp({
       showModal, wasInUrl, nameInput, nameInputRef, confirmName,
       // Connection
       connStatus,
-      // Video
+      // Video (native + YouTube)
       videoEl, videoWrapper, videoSrc, urlInput, videoTitle, syncPulse,
+      videoType, ytVideoId,
       onPlay, onPause, onSeeked, loadVideo, forceSyncPeers,
       // Participants
       onlineUsers, colorOf,
