@@ -1141,12 +1141,9 @@
         referrerpolicy="no-referrer"
       ></iframe>
 
-      <!-- Notice bar shown over the iframe explaining manual sync -->
+      <!-- Notice bar shown over the iframe — uses v-html for bold formatting -->
       <div class="iframe-notice" v-if="videoType === 'iframe' && iframeSrc && showIframeNotice">
-        <span class="iframe-notice-text">
-          🎬 Embedded player — seek to your start point, then
-          {{ isHost ? 'press <strong>3-2-1 Sync</strong> so everyone plays together' : 'wait for the Host to start the countdown' }}
-        </span>
+        <span class="iframe-notice-text" v-html="iframeNoticeHtml"></span>
         <button class="iframe-notice-close" @click="showIframeNotice = false">✕</button>
       </div>
 
@@ -1213,6 +1210,24 @@
           @click="forceSyncPeers"
           :title="videoType === 'iframe' ? 'Send 3-2-1 countdown to all viewers' : 'Broadcast current timestamp to all peers'"
         >{{ videoType === 'iframe' ? '3-2-1 Sync' : 'Sync All' }}</button>
+      </div>
+
+      <!-- Row 1b: Sync Point (iframe mode only — Host announces timestamp in chat) -->
+      <!-- Since we can't read the iframe's current time, the Host types it manually.
+           This broadcasts the timestamp to chat so everyone seeks to the same point,
+           then Host fires 3-2-1 Sync to make everyone press play together. -->
+      <div class="ctrl-row" v-if="isHost && videoType === 'iframe'">
+        <span class="ctrl-label">Sync Point</span>
+        <input
+          class="field"
+          v-model="syncTimeInput"
+          placeholder="Type your current timestamp, e.g.  1:18:05  — then Announce"
+          @keydown.enter="broadcastSyncPoint"
+          style="font-family: var(--font-mono)"
+        />
+        <button class="btn btn-ghost" @click="broadcastSyncPoint" :disabled="!syncTimeInput.trim()">
+          📢 Announce
+        </button>
       </div>
 
       <!-- Row 2: Room share link -->
@@ -1523,7 +1538,7 @@ const uid = () => ++_uid;
 // ════════════════════════════════════════════════════════════════════
 //  VUE 3 APP
 // ════════════════════════════════════════════════════════════════════
-const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
+const { createApp, ref, computed, watch, onMounted, onUnmounted, nextTick } = Vue;
 
 createApp({
   setup() {
@@ -1571,6 +1586,17 @@ createApp({
     const showCountdown  = ref(false);
     const countdownNum   = ref(3);
     let   countdownTimer = null;
+
+    // Sync Point: host manually types their current playback position
+    // so peers know where to seek before the 3-2-1 countdown fires
+    const syncTimeInput = ref('');
+
+    // Computed HTML string for the iframe notice bar
+    // (uses v-html so <strong> renders correctly)
+    const iframeNoticeHtml = computed(() => isHost.value
+      ? '🎬 <strong>Host:</strong> Seek to your start point → type the timestamp in <strong>Sync Point</strong> → press <strong>Announce</strong> → then <strong>3-2-1 Sync</strong>'
+      : '🎬 <strong>Viewer:</strong> Seek to the timestamp announced in chat, then wait for the <strong>3-2-1 countdown</strong> — press play on GO!'
+    );
 
     // YouTube IFrame Player instance (not reactive — plain JS object)
     let ytPlayer = null;
@@ -1849,6 +1875,28 @@ createApp({
         countdownTimer = setTimeout(tick, 1000);
       };
       tick();
+    }
+
+    /**
+     * Broadcast the host's manually-entered timestamp to all peers via chat.
+     * Peers see it in the chat panel and manually seek their iframe to that point.
+     * After seeking, host fires 3-2-1 Sync so everyone presses play together.
+     */
+    function broadcastSyncPoint() {
+      const t = syncTimeInput.value.trim();
+      if (!t) return;
+
+      const body = `📍 Seek to  ${t}  — then wait for the 3-2-1 countdown to press play`;
+      const ts   = Date.now();
+
+      // Show locally
+      pushMsg({ id: uid(), type: 'chat', author: '⚡ Sync', body, time: hhMm(ts), isHost: true });
+
+      // Broadcast to peers
+      emit('chat_message', { user: '⚡ Sync', text: body, ts, isHost: true });
+
+      toast(`Sync point "${t}" announced — fire 3-2-1 Sync when everyone is ready`);
+      syncTimeInput.value = '';
     }
 
     /** Force-sync all peers. Behaviour depends on the active video type. */
@@ -2230,8 +2278,9 @@ createApp({
       connStatus,
       // Video — native, YouTube, and iframe embed
       videoEl, videoWrapper, videoSrc, urlInput, videoTitle, syncPulse,
-      videoType, ytVideoId, iframeSrc, showIframeNotice,
+      videoType, ytVideoId, iframeSrc, showIframeNotice, iframeNoticeHtml,
       showCountdown, countdownNum,
+      syncTimeInput, broadcastSyncPoint,
       onPlay, onPause, onSeeked, loadVideo, forceSyncPeers,
       // Participants
       onlineUsers, colorOf,
