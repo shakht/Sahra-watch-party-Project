@@ -332,6 +332,85 @@
       border: none;
     }
 
+    /* ── Iframe Embed Player ── */
+    /* Used for streaming site URLs (cinema.albox.co etc.)
+       The <iframe> fills the entire video-wrapper */
+    .iframe-player {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: #000;
+    }
+
+    /* Notice bar shown above the iframe */
+    .iframe-notice {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      background: rgba(124, 58, 237, 0.92);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 6px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      z-index: 30;
+    }
+    .iframe-notice-text { flex: 1; }
+    .iframe-notice-close {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.7);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 4px;
+      line-height: 1;
+    }
+    .iframe-notice-close:hover { color: #fff; }
+
+    /* ── 3-2-1 Countdown Sync Overlay ── */
+    /* Shown over the video wrapper when host triggers countdown sync */
+    .countdown-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.86);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 60;
+      pointer-events: none;
+    }
+    .countdown-inner { text-align: center; }
+    .countdown-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 18px;
+    }
+    .countdown-digit {
+      font-size: 128px;
+      font-weight: 900;
+      line-height: 1;
+      color: var(--accent-red);
+      animation: countPop 0.35s cubic-bezier(0.2, 0.8, 0.4, 1) both;
+      font-variant-numeric: tabular-nums;
+    }
+    .countdown-go {
+      font-size: 64px;
+      font-weight: 900;
+      color: var(--online-dot);
+      animation: countPop 0.35s cubic-bezier(0.2, 0.8, 0.4, 1) both;
+    }
+    @keyframes countPop {
+      from { transform: scale(1.5); opacity: 0; }
+      to   { transform: scale(1);   opacity: 1; }
+    }
+
     /* ── Sync Flash Indicator ── */
     .sync-indicator {
       position: absolute;
@@ -1051,8 +1130,28 @@
         v-show="videoType === 'youtube' && ytVideoId"
       ></div>
 
+      <!-- ③ Iframe Embed Player — for streaming site URLs that aren't direct files -->
+      <!-- The iframe just displays the site. Sync is manual via the 3-2-1 countdown. -->
+      <iframe
+        v-if="videoType === 'iframe' && iframeSrc"
+        class="iframe-player"
+        :src="iframeSrc"
+        allowfullscreen
+        allow="autoplay; fullscreen; encrypted-media"
+        referrerpolicy="no-referrer"
+      ></iframe>
+
+      <!-- Notice bar shown over the iframe explaining manual sync -->
+      <div class="iframe-notice" v-if="videoType === 'iframe' && iframeSrc && showIframeNotice">
+        <span class="iframe-notice-text">
+          🎬 Embedded player — seek to your start point, then
+          {{ isHost ? 'press <strong>3-2-1 Sync</strong> so everyone plays together' : 'wait for the Host to start the countdown' }}
+        </span>
+        <button class="iframe-notice-close" @click="showIframeNotice = false">✕</button>
+      </div>
+
       <!-- Empty / placeholder state — shown only when no source is loaded -->
-      <div class="video-placeholder" v-if="!videoSrc && !ytVideoId">
+      <div class="video-placeholder" v-if="!videoSrc && !ytVideoId && !iframeSrc">
         <div class="placeholder-icon">
           <svg width="72" height="72" viewBox="0 0 24 24" fill="none"
                stroke="currentColor" stroke-width="0.8" stroke-linecap="round">
@@ -1060,8 +1159,8 @@
             <polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none" opacity="0.6"/>
           </svg>
         </div>
-        <p>Paste a direct media URL below to begin</p>
-        <div class="placeholder-hint">.mp4 · .webm · .mkv · HLS m3u8</div>
+        <p>Paste a video URL or any streaming site link below to begin</p>
+        <div class="placeholder-hint">YouTube · .mp4 · .m3u8 · any streaming page</div>
       </div>
 
       <!-- Floating emoji layer — animations triggered by reactions -->
@@ -1072,6 +1171,19 @@
           class="float-emoji"
           :style="{ left: fe.x + 'px' }"
         >{{ fe.char }}</span>
+      </div>
+
+      <!-- ── 3-2-1 Countdown Overlay ──
+           Appears on ALL screens when Host triggers sync.
+           Everyone sees the same countdown and presses play on GO! -->
+      <div class="countdown-overlay" v-if="showCountdown">
+        <div class="countdown-inner">
+          <div class="countdown-label">Get ready to press play</div>
+          <div class="countdown-digit" v-if="countdownNum > 0" :key="countdownNum">
+            {{ countdownNum }}
+          </div>
+          <div class="countdown-go" v-else>▶ GO!</div>
+        </div>
       </div>
 
       <!-- Sync pulse badge (flashes when peer receives host sync) -->
@@ -1093,12 +1205,14 @@
           @keydown.enter="loadVideo"
         />
         <button class="btn btn-ghost" @click="loadVideo">Load</button>
+        <!-- Sync button: always visible for Host once a video is loaded.
+             Label and behaviour change based on video type. -->
         <button
-          v-if="isHost && videoSrc"
+          v-if="isHost && (videoSrc || ytVideoId || iframeSrc)"
           class="btn btn-purple"
           @click="forceSyncPeers"
-          title="Broadcast current timestamp to all peers"
-        >Sync All</button>
+          :title="videoType === 'iframe' ? 'Send 3-2-1 countdown to all viewers' : 'Broadcast current timestamp to all peers'"
+        >{{ videoType === 'iframe' ? '3-2-1 Sync' : 'Sync All' }}</button>
       </div>
 
       <!-- Row 2: Room share link -->
@@ -1378,6 +1492,14 @@ function parseVideoUrl(url) {
 }
 
 /**
+ * Returns true if the URL points to a playable media file
+ * (native <video> can handle it directly).
+ */
+function isDirectMediaUrl(url) {
+  return /\.(mp4|webm|mkv|ogg|ogv|mov|m3u8|mpd|flv|wmv|ts|avi)(\?.*)?$/i.test(url);
+}
+
+/**
  * Lazily load the YouTube IFrame Player API script once.
  * Resolves immediately if YT is already on the page.
  */
@@ -1439,9 +1561,16 @@ createApp({
     const videoTitle   = ref('');
     const syncPulse    = ref(false);
 
-    // 'native' = direct file URL  |  'youtube' = YouTube IFrame API
-    const videoType = ref('native');
-    const ytVideoId = ref('');       // extracted YouTube video ID
+    // 'native' = direct file URL  |  'youtube' = YouTube IFrame API  |  'iframe' = embedded webpage
+    const videoType      = ref('native');
+    const ytVideoId      = ref('');    // YouTube video ID
+    const iframeSrc      = ref('');    // URL for iframe embed mode
+    const showIframeNotice = ref(true);// dismissable tip shown over the iframe
+
+    // 3-2-1 countdown sync (used in iframe mode)
+    const showCountdown  = ref(false);
+    const countdownNum   = ref(3);
+    let   countdownTimer = null;
 
     // YouTube IFrame Player instance (not reactive — plain JS object)
     let ytPlayer = null;
@@ -1617,19 +1746,33 @@ createApp({
         spawnEmoji(payload.emoji);
       });
 
+      // ── Broadcast: iframe_countdown ───────────────────────
+      // Host sent the 3-2-1 countdown — show it on all peer screens.
+      channel.on('broadcast', { event: 'iframe_countdown' }, () => {
+        startCountdown();
+      });
+
       // ── Broadcast: video_source ───────────────────────────
-      // Fired when the Host loads a new video.
-      // Peers receive it and auto-load the same video so everyone is watching
-      // the same content without manually pasting the URL.
+      // Fired when the Host loads a new video (any type).
+      // Peers receive it and auto-load the same source so no one has to
+      // manually paste the URL themselves.
       channel.on('broadcast', { event: 'video_source' }, ({ payload }) => {
-        if (isHost.value) return; // host never echoes to itself but guard anyway
+        if (isHost.value) return; // guard (self:false already prevents echo)
         remoteSourceApply = true;
-        // Reconstruct a full URL for the input field
-        urlInput.value = payload.type === 'youtube'
-          ? `https://www.youtube.com/watch?v=${payload.id}`
-          : (payload.url || '');
+
+        // Reconstruct the URL the peer should load
+        urlInput.value =
+          payload.type === 'youtube'
+            ? `https://www.youtube.com/watch?v=${payload.id}`
+            : (payload.url || '');
+
+        const typeLabel =
+          payload.type === 'youtube' ? 'YouTube video' :
+          payload.type === 'iframe'  ? 'streaming page' :
+                                       'video';
+
         loadVideo().finally(() => { remoteSourceApply = false; });
-        sysMsg(`▶ Host loaded a new ${payload.type === 'youtube' ? 'YouTube ' : ''}video`);
+        sysMsg(`▶ Host loaded a ${typeLabel}`);
       });
 
       // ── Subscribe then begin presence tracking ───────────
@@ -1682,23 +1825,58 @@ createApp({
       }, SEEK_DEBOUNCE_MS);
     }
 
-    /** Force-sync all peers to current playback position + video source */
+    /**
+     * Run the 3-2-1 countdown locally.
+     * Called both on the Host (who triggered it) and on every Peer
+     * that receives the `iframe_countdown` broadcast.
+     */
+    function startCountdown() {
+      clearTimeout(countdownTimer);
+      showCountdown.value = true;
+      countdownNum.value  = 3;
+      let n = 3;
+
+      const tick = () => {
+        countdownNum.value = n;
+        if (n === 0) {
+          // "GO!" frame — hide after 900 ms
+          countdownTimer = setTimeout(() => {
+            showCountdown.value = false;
+          }, 900);
+          return;
+        }
+        n--;
+        countdownTimer = setTimeout(tick, 1000);
+      };
+      tick();
+    }
+
+    /** Force-sync all peers. Behaviour depends on the active video type. */
     function forceSyncPeers() {
       if (!isHost.value) return;
 
-      if (videoType.value === 'youtube' && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
+      if (videoType.value === 'iframe') {
+        // ── Iframe mode: broadcast countdown then everyone presses play ──
+        emit('iframe_countdown', {});
+        startCountdown(); // host sees it too
+        toast('3-2-1 countdown sent — press play when you see GO!');
+
+      } else if (videoType.value === 'youtube' && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
+        // ── YouTube mode: broadcast current timestamp ──
         const state  = ytPlayer.getPlayerState();
         const action = state === YT.PlayerState.PLAYING ? 'play' : 'pause';
         emit('playback_control', { action, ts: ytPlayer.getCurrentTime() });
-        // Also re-broadcast the video source so late-joining peers load the video
         if (ytVideoId.value) emit('video_source', { type: 'youtube', id: ytVideoId.value });
+        toast('Sync broadcast sent to all viewers');
+
       } else {
+        // ── Native mode: broadcast current timestamp ──
         const v = videoEl.value;
         if (!v) return;
         emit('playback_control', { action: v.paused ? 'pause' : 'play', ts: v.currentTime });
         if (videoSrc.value) emit('video_source', { type: 'native', url: videoSrc.value });
+        toast('Sync broadcast sent to all viewers');
       }
-      toast('Sync broadcast sent to all viewers');
     }
 
     // ── Apply a remote playback command received from the Host ──
@@ -1783,16 +1961,36 @@ createApp({
           emit('video_source', { type: 'youtube', id: parsed.id });
         }
 
-      } else {
+      } else if (isDirectMediaUrl(u)) {
         // ── Native direct URL mode ────────────────────────────
         videoType.value  = 'native';
         ytVideoId.value  = '';
+        iframeSrc.value  = '';
         videoSrc.value   = u;
         videoTitle.value = decodeURIComponent(u.split('/').pop().split('?')[0]) || u;
 
         if (isHost.value && !remoteSourceApply) {
           emit('video_source', { type: 'native', url: u });
         }
+
+      } else {
+        // ── Iframe embed mode ─────────────────────────────────
+        // Catches any URL that isn't YouTube or a direct media file:
+        // streaming sites, Vimeo, Dailymotion, custom players, etc.
+        videoType.value    = 'iframe';
+        iframeSrc.value    = u;
+        videoSrc.value     = '';
+        ytVideoId.value    = '';
+        showIframeNotice.value = true;
+        try {
+          videoTitle.value = new URL(u).hostname.replace('www.', '') + ' — embedded';
+        } catch { videoTitle.value = 'Embedded player'; }
+
+        if (isHost.value && !remoteSourceApply) {
+          emit('video_source', { type: 'iframe', url: u });
+        }
+
+        toast('Streaming site loaded in embedded player');
       }
 
       toast('Media source loaded');
@@ -2030,9 +2228,10 @@ createApp({
       showModal, wasInUrl, nameInput, nameInputRef, confirmName,
       // Connection
       connStatus,
-      // Video (native + YouTube)
+      // Video — native, YouTube, and iframe embed
       videoEl, videoWrapper, videoSrc, urlInput, videoTitle, syncPulse,
-      videoType, ytVideoId,
+      videoType, ytVideoId, iframeSrc, showIframeNotice,
+      showCountdown, countdownNum,
       onPlay, onPause, onSeeked, loadVideo, forceSyncPeers,
       // Participants
       onlineUsers, colorOf,
