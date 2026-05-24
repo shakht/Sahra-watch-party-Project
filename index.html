@@ -1,0 +1,1856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>سَهرة · Sahra — Watch Party</title>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       CDN DEPENDENCIES
+       Vue 3 (Composition API, no build step)
+       Supabase JS v2 (Realtime Broadcast + Presence)
+  ═══════════════════════════════════════════════════════════ -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <style>
+    /* ════════════════════════════════════════════════════════════
+       DESIGN SYSTEM — Minimal Cultural Futurism
+       Palette: Obsidian base · Crimson accent · Electric purple CTA
+    ════════════════════════════════════════════════════════════ */
+    :root {
+      --bg-base:           #0d0e12;
+      --bg-card:           #161820;
+      --bg-input:          #1c1e28;
+      --bg-hover:          #1f2130;
+      --border:            #242736;
+      --border-subtle:     #1a1c26;
+      --accent-red:        #e50914;
+      --accent-purple:     #7c3aed;
+      --accent-purple-dim: #4c2a8a;
+      --text-primary:      #f0f0f5;
+      --text-secondary:    #8a8da8;
+      --text-muted:        #4a4d65;
+      --online-dot:        #22c55e;
+      --radius-sm:         6px;
+      --radius-md:         10px;
+      --radius-lg:         14px;
+      --font-mono:         'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+      --transition:        150ms ease;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      overflow: hidden;
+    }
+
+    /* ── Custom Scrollbars ── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+    /* ════════════════════════════════════════════════════════════
+       NICKNAME MODAL OVERLAY
+    ════════════════════════════════════════════════════════════ */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.88);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      backdrop-filter: blur(6px);
+    }
+    .modal {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 38px 42px;
+      width: 430px;
+      max-width: 92vw;
+    }
+    .modal-logo {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.6px;
+      margin-bottom: 6px;
+    }
+    .modal-logo .accent { color: var(--accent-red); }
+    .modal-sub {
+      color: var(--text-secondary);
+      font-size: 13px;
+      margin-bottom: 30px;
+      line-height: 1.6;
+    }
+    .modal label {
+      display: block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+    .modal input {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 15px;
+      padding: 12px 14px;
+      outline: none;
+      transition: border-color var(--transition);
+      margin-bottom: 22px;
+      font-family: inherit;
+    }
+    .modal input:focus { border-color: var(--accent-purple); }
+    .modal input::placeholder { color: var(--text-muted); }
+    .modal-room-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 18px;
+      font-family: var(--font-mono);
+    }
+    .modal-room-hint span { color: var(--text-secondary); }
+
+    /* ════════════════════════════════════════════════════════════
+       ROOT LAYOUT — Flex split-screen
+    ════════════════════════════════════════════════════════════ */
+    #app {
+      display: flex;
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       MAIN PANEL — Left ~75%
+    ════════════════════════════════════════════════════════════ */
+    .main-panel {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      border-right: 1px solid var(--border);
+    }
+
+    /* ── Top Navigation Bar ── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      height: 52px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      gap: 14px;
+    }
+    .topbar-brand {
+      font-size: 17px;
+      font-weight: 800;
+      letter-spacing: -0.4px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .topbar-brand .dot { color: var(--accent-red); }
+    .topbar-divider {
+      width: 1px;
+      height: 18px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+    .topbar-title {
+      flex: 1;
+      font-size: 12px;
+      color: var(--text-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    /* ── Status Badge ── */
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 10px;
+      white-space: nowrap;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      flex-shrink: 0;
+      transition: background 0.3s ease, box-shadow 0.3s ease;
+    }
+    .status-dot.connected {
+      background: var(--online-dot);
+      box-shadow: 0 0 6px var(--online-dot);
+    }
+    .status-dot.connecting {
+      background: #f59e0b;
+      animation: pulse-dot 1s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.25; }
+    }
+
+    /* ── Role Chip ── */
+    .role-chip {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid;
+      white-space: nowrap;
+    }
+    .role-chip.host {
+      color: var(--accent-red);
+      border-color: rgba(229, 9, 20, 0.5);
+      background: rgba(229, 9, 20, 0.07);
+    }
+    .role-chip.viewer {
+      color: var(--text-muted);
+      border-color: var(--border);
+    }
+
+    /* ── Video Wrapper ── */
+    .video-wrapper {
+      flex: 1;
+      position: relative;
+      background: #000;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 0;
+    }
+    .video-wrapper video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    /* ── Empty State ── */
+    .video-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      color: var(--text-muted);
+      text-align: center;
+      padding: 40px;
+      pointer-events: none;
+      user-select: none;
+    }
+    .video-placeholder .placeholder-icon {
+      opacity: 0.2;
+    }
+    .video-placeholder p {
+      font-size: 13px;
+      color: var(--text-muted);
+      max-width: 280px;
+      line-height: 1.6;
+    }
+    .video-placeholder .placeholder-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      opacity: 0.6;
+      font-family: var(--font-mono);
+    }
+
+    /* ── Floating Emoji Layer (over the video) ── */
+    .emoji-float-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 10;
+    }
+    .float-emoji {
+      position: absolute;
+      bottom: 80px;
+      font-size: 30px;
+      line-height: 1;
+      animation: floatUp 2s cubic-bezier(0.2, 0.8, 0.5, 1) forwards;
+      pointer-events: none;
+      user-select: none;
+      will-change: transform, opacity;
+    }
+    @keyframes floatUp {
+      0%   { transform: translateY(0px)   scale(0.7); opacity: 0;   }
+      12%  { transform: translateY(-18px) scale(1.15); opacity: 1;  }
+      75%  { opacity: 1; }
+      100% { transform: translateY(-180px) scale(0.85); opacity: 0; }
+    }
+
+    /* ── Sync Flash Indicator ── */
+    .sync-indicator {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      background: rgba(229, 9, 20, 0.9);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 4px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      z-index: 20;
+      pointer-events: none;
+    }
+    .sync-indicator.visible { opacity: 1; }
+
+    /* ── Bottom Control Bar ── */
+    .control-bar {
+      border-top: 1px solid var(--border);
+      padding: 11px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      flex-shrink: 0;
+      background: var(--bg-card);
+    }
+    .ctrl-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .ctrl-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      white-space: nowrap;
+      min-width: 68px;
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       SHARED INPUT / BUTTON STYLES
+    ════════════════════════════════════════════════════════════ */
+    .field {
+      flex: 1;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 12px;
+      padding: 8px 11px;
+      outline: none;
+      transition: border-color var(--transition);
+      font-family: var(--font-mono);
+      min-width: 0;
+    }
+    .field:focus { border-color: var(--accent-purple); }
+    .field::placeholder { color: var(--text-muted); font-family: inherit; }
+    .field.monospace { font-family: var(--font-mono); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all var(--transition);
+      border: 1px solid transparent;
+      white-space: nowrap;
+      padding: 8px 13px;
+      letter-spacing: 0.04em;
+      font-family: inherit;
+    }
+    .btn:active:not(:disabled) { transform: scale(0.96); }
+    .btn:disabled              { opacity: 0.38; cursor: not-allowed; }
+
+    .btn-primary {
+      background: var(--accent-red);
+      color: #fff;
+      border-color: var(--accent-red);
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: #ff1c1c;
+      box-shadow: 0 0 18px rgba(229, 9, 20, 0.32);
+    }
+
+    .btn-purple {
+      background: var(--accent-purple);
+      color: #fff;
+      border-color: var(--accent-purple);
+    }
+    .btn-purple:hover:not(:disabled) {
+      background: #8b46ff;
+      box-shadow: 0 0 16px rgba(124, 58, 237, 0.38);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-secondary);
+      border-color: var(--border);
+    }
+    .btn-ghost:hover:not(:disabled) {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+      border-color: var(--text-muted);
+    }
+
+    /* Room link display */
+    .room-link-val {
+      flex: 1;
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      padding: 7px 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       SIDEBAR — Right ~25%
+    ════════════════════════════════════════════════════════════ */
+    .sidebar {
+      width: 275px;
+      min-width: 230px;
+      max-width: 310px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-card);
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+
+    /* ── Participants Block (~20% of sidebar) ── */
+    .participants-block {
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .block-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px 8px;
+    }
+    .block-title {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .count-badge {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-muted);
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 2px 7px;
+    }
+    .participants-list {
+      max-height: 140px;
+      overflow-y: auto;
+      padding: 0 10px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .p-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 7px;
+      border-radius: var(--radius-sm);
+      transition: background var(--transition);
+    }
+    .p-item:hover { background: var(--bg-hover); }
+    .p-avatar {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 800;
+      flex-shrink: 0;
+      color: rgba(255, 255, 255, 0.9);
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+    .p-info { flex: 1; min-width: 0; }
+    .p-name {
+      font-size: 12px;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .p-name-tag {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent-red);
+    }
+    .p-name-you {
+      font-size: 9px;
+      color: var(--text-muted);
+    }
+    .p-role { font-size: 10px; color: var(--text-muted); }
+    .online-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--online-dot);
+      box-shadow: 0 0 5px var(--online-dot);
+      flex-shrink: 0;
+    }
+    .empty-list {
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 6px 7px;
+      font-style: italic;
+    }
+
+    /* ── Chat Block (~80% of sidebar) ── */
+    .chat-block {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    /* Messages scroll area */
+    .messages-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .msg {
+      padding: 5px 8px;
+      border-radius: var(--radius-sm);
+      transition: background var(--transition);
+    }
+    .msg:hover { background: var(--bg-hover); }
+    .msg-head {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      margin-bottom: 2px;
+    }
+    .msg-author {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent-purple);
+    }
+    .msg-author.is-me    { color: var(--accent-red); }
+    .msg-author.is-host  { color: #f59e0b; }
+    .msg-ts {
+      font-size: 9px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+    .msg-body {
+      font-size: 13px;
+      line-height: 1.42;
+      word-break: break-word;
+      color: var(--text-primary);
+    }
+    /* System messages */
+    .msg.sys .msg-body {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    /* ── Emoji Reaction Strip ── */
+    .emoji-strip {
+      padding: 7px 10px;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+    .emoji-btn {
+      flex: 1;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 17px;
+      padding: 6px 4px;
+      cursor: pointer;
+      transition: all var(--transition);
+      text-align: center;
+      line-height: 1;
+    }
+    .emoji-btn:hover  { background: var(--bg-hover); transform: scale(1.14); }
+    .emoji-btn:active { transform: scale(0.93); }
+
+    /* ── Chat Input Row ── */
+    .chat-input-row {
+      padding: 9px 10px;
+      display: flex;
+      gap: 7px;
+      flex-shrink: 0;
+      align-items: center;
+    }
+    .chat-field {
+      flex: 1;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 13px;
+      padding: 8px 11px;
+      outline: none;
+      transition: border-color var(--transition);
+      resize: none;
+      height: 36px;
+      line-height: 1.25;
+      font-family: inherit;
+    }
+    .chat-field:focus    { border-color: var(--accent-purple); }
+    .chat-field::placeholder { color: var(--text-muted); }
+
+    .send-btn {
+      width: 36px;
+      height: 36px;
+      background: var(--accent-purple);
+      border: none;
+      border-radius: var(--radius-sm);
+      color: #fff;
+      cursor: pointer;
+      transition: all var(--transition);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .send-btn:hover  { background: #8b46ff; box-shadow: 0 0 12px rgba(124,58,237,0.4); }
+    .send-btn:active { transform: scale(0.93); }
+
+    /* ════════════════════════════════════════════════════════════
+       TOAST NOTIFICATIONS
+    ════════════════════════════════════════════════════════════ */
+    .toast-shelf {
+      position: fixed;
+      bottom: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 800;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
+      pointer-events: none;
+    }
+    .toast {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 9px 16px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      animation: slideUp 0.22s ease forwards;
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       MODAL — CREATE vs JOIN differentiation
+    ════════════════════════════════════════════════════════════ */
+
+    /* Small pill at the top of the modal indicating mode */
+    .modal-mode-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 20px;
+      margin-bottom: 16px;
+      border: 1px solid;
+    }
+    .modal-mode-pill.create {
+      color: var(--accent-red);
+      border-color: rgba(229, 9, 20, 0.4);
+      background: rgba(229, 9, 20, 0.07);
+    }
+    .modal-mode-pill.join {
+      color: var(--accent-purple);
+      border-color: rgba(124, 58, 237, 0.4);
+      background: rgba(124, 58, 237, 0.07);
+    }
+
+    /* Room ID display card used in the JOIN flow */
+    .room-id-card {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      margin-bottom: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .room-id-card-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .room-id-card-value {
+      font-family: var(--font-mono);
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      color: var(--text-primary);
+    }
+    .room-id-card-icon {
+      font-size: 28px;
+      opacity: 0.6;
+      flex-shrink: 0;
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       EXIT / LEAVE PARTY
+    ════════════════════════════════════════════════════════════ */
+
+    /* Leave button — lives in the topbar */
+    .leave-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 5px 11px;
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(229, 9, 20, 0.3);
+      background: transparent;
+      color: var(--accent-red);
+      cursor: pointer;
+      transition: all var(--transition);
+      white-space: nowrap;
+      font-family: inherit;
+    }
+    .leave-btn:hover {
+      background: rgba(229, 9, 20, 0.1);
+      border-color: var(--accent-red);
+    }
+    .leave-btn:active { transform: scale(0.95); }
+
+    /* ── Exit Confirmation Modal ── */
+    .confirm-modal {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 32px 36px;
+      width: 380px;
+      max-width: 92vw;
+      text-align: center;
+    }
+    .confirm-icon {
+      font-size: 36px;
+      margin-bottom: 14px;
+      display: block;
+    }
+    .confirm-title {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      margin-bottom: 8px;
+    }
+    .confirm-sub {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 28px;
+      line-height: 1.6;
+    }
+    .confirm-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .confirm-actions .btn {
+      flex: 1;
+      padding: 11px;
+      font-size: 12px;
+    }
+
+    /* ── Left-Party Landing Screen ── */
+    .left-screen {
+      position: fixed;
+      inset: 0;
+      background: var(--bg-base);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      z-index: 2000;
+    }
+    .left-screen-inner {
+      text-align: center;
+      max-width: 400px;
+      padding: 40px;
+    }
+    .left-screen-brand {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.4px;
+      margin-bottom: 28px;
+      color: var(--text-muted);
+    }
+    .left-screen-brand span { color: var(--accent-red); }
+    .left-screen-emoji {
+      font-size: 52px;
+      margin-bottom: 20px;
+      display: block;
+      animation: fadeInDown 0.5s ease;
+    }
+    @keyframes fadeInDown {
+      from { opacity: 0; transform: translateY(-16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .left-screen-title {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.4px;
+      margin-bottom: 10px;
+      animation: fadeInDown 0.5s 0.05s ease both;
+    }
+    .left-screen-sub {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.65;
+      margin-bottom: 32px;
+      animation: fadeInDown 0.5s 0.1s ease both;
+    }
+    .left-screen-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      animation: fadeInDown 0.5s 0.15s ease both;
+    }
+    .left-screen-actions .btn {
+      padding: 12px 24px;
+      font-size: 13px;
+      width: 100%;
+      justify-content: center;
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       RESPONSIVE CLAMPS
+    ════════════════════════════════════════════════════════════ */
+    @media (max-width: 780px) {
+      .sidebar       { width: 210px; min-width: 185px; }
+      .topbar-title  { display: none; }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ═══════════════════════════════════════════════════════════
+       NICKNAME MODAL — Create Party (host) OR Join Party (guest)
+       `wasInUrl` is true when ?room= was already in the shared URL
+  ═══════════════════════════════════════════════════════════ -->
+  <div class="overlay" v-if="showModal">
+    <div class="modal">
+
+      <!-- ── Mode pill: CREATE vs JOIN ── -->
+      <div class="modal-mode-pill" :class="wasInUrl ? 'join' : 'create'">
+        <span>{{ wasInUrl ? '🎬' : '✨' }}</span>
+        {{ wasInUrl ? 'Join Watch Party' : 'Create Watch Party' }}
+      </div>
+
+      <!-- ── Brand + tagline ── -->
+      <div class="modal-logo">سَهرة <span class="accent">Sahra</span></div>
+      <div class="modal-sub" v-if="!wasInUrl">
+        Start a watch party. Share the link, load a video, and
+        watch together — perfectly in sync with everyone.
+      </div>
+      <div class="modal-sub" v-else>
+        You've been invited to watch together. Pick a name and
+        jump in — the party is already running!
+      </div>
+
+      <!-- ── JOIN MODE: prominent room ID card ── -->
+      <div class="room-id-card" v-if="wasInUrl">
+        <div>
+          <div class="room-id-card-label">Room ID</div>
+          <div class="room-id-card-value">{{ roomId }}</div>
+        </div>
+        <div class="room-id-card-icon">🍿</div>
+      </div>
+
+      <!-- ── CREATE MODE: small room hint ── -->
+      <div class="modal-room-hint" v-else>
+        Your room will be: <span>{{ roomId }}</span>
+      </div>
+
+      <!-- ── Nickname input ── -->
+      <label>Your display name</label>
+      <input
+        v-model="nameInput"
+        type="text"
+        :placeholder="wasInUrl ? 'e.g. MovieFan, NightOwl…' : 'e.g. CinemaHost, FilmBuff…'"
+        maxlength="24"
+        ref="nameInputRef"
+        @keydown.enter="confirmName"
+      />
+
+      <!-- ── CTA button: different label & colour per mode ── -->
+      <button
+        class="btn"
+        :class="wasInUrl ? 'btn-purple' : 'btn-primary'"
+        style="width:100%; padding:12px; font-size:13px; letter-spacing:0.04em"
+        @click="confirmName"
+        :disabled="!nameInput.trim()"
+      >
+        {{ wasInUrl ? '🎬  Join the Party →' : '✨  Create Party →' }}
+      </button>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       MAIN PANEL — Video + Controls  (~75% width)
+  ═══════════════════════════════════════════════════════════ -->
+  <div class="main-panel">
+
+    <!-- ── Navigation Topbar ── -->
+    <div class="topbar">
+      <div class="topbar-brand">سَهرة <span class="dot">·</span> Sahra</div>
+      <div class="topbar-divider"></div>
+      <div class="topbar-title">{{ videoTitle || 'No media loaded' }}</div>
+      <div class="topbar-right">
+        <!-- Live connection badge -->
+        <div class="status-badge">
+          <div class="status-dot" :class="connStatus"></div>
+          <span>{{
+            connStatus === 'connected'   ? 'Live'         :
+            connStatus === 'connecting'  ? 'Connecting…'  :
+                                          'Offline'
+          }}</span>
+        </div>
+        <!-- Host / Viewer role -->
+        <div class="role-chip" :class="isHost ? 'host' : 'viewer'">
+          {{ isHost ? '⚡ Host' : '👁 Viewer' }}
+        </div>
+        <!-- Leave Party -->
+        <button class="leave-btn" @click="showExitConfirm = true" title="Leave the watch party">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+          Leave
+        </button>
+      </div>
+    </div>
+
+    <!-- ── Video Player ── -->
+    <div class="video-wrapper" ref="videoWrapper">
+
+      <!-- Native HTML5 video element -->
+      <video
+        v-show="videoSrc"
+        ref="videoEl"
+        :src="videoSrc"
+        controls
+        preload="metadata"
+        @play="onPlay"
+        @pause="onPause"
+        @seeked="onSeeked"
+      ></video>
+
+      <!-- Empty / placeholder state -->
+      <div class="video-placeholder" v-if="!videoSrc">
+        <div class="placeholder-icon">
+          <svg width="72" height="72" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="0.8" stroke-linecap="round">
+            <rect x="2" y="4" width="20" height="16" rx="2"/>
+            <polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none" opacity="0.6"/>
+          </svg>
+        </div>
+        <p>Paste a direct media URL below to begin</p>
+        <div class="placeholder-hint">.mp4 · .webm · .mkv · HLS m3u8</div>
+      </div>
+
+      <!-- Floating emoji layer — animations triggered by reactions -->
+      <div class="emoji-float-layer">
+        <span
+          v-for="fe in floaters"
+          :key="fe.id"
+          class="float-emoji"
+          :style="{ left: fe.x + 'px' }"
+        >{{ fe.char }}</span>
+      </div>
+
+      <!-- Sync pulse badge (flashes when peer receives host sync) -->
+      <div class="sync-indicator" :class="{ visible: syncPulse }">⟳ Syncing</div>
+
+    </div><!-- .video-wrapper -->
+
+    <!-- ── Bottom Control Bar ── -->
+    <div class="control-bar">
+
+      <!-- Row 1: Source URL input -->
+      <div class="ctrl-row">
+        <span class="ctrl-label">Source</span>
+        <input
+          class="field"
+          v-model="urlInput"
+          type="url"
+          placeholder="https://example.com/film.mp4  ·  stream.m3u8  ·  clip.webm"
+          @keydown.enter="loadVideo"
+        />
+        <button class="btn btn-ghost" @click="loadVideo">Load</button>
+        <button
+          v-if="isHost && videoSrc"
+          class="btn btn-purple"
+          @click="forceSyncPeers"
+          title="Broadcast current timestamp to all peers"
+        >Sync All</button>
+      </div>
+
+      <!-- Row 2: Room share link -->
+      <div class="ctrl-row">
+        <span class="ctrl-label">Room Link</span>
+        <div class="room-link-val" :title="fullRoomUrl">{{ fullRoomUrl }}</div>
+        <button class="btn btn-ghost" @click="copyLink">
+          {{ linkCopied ? '✓ Copied' : 'Copy' }}
+        </button>
+        <!-- Claim host if not already host -->
+        <button
+          v-if="!isHost"
+          class="btn btn-ghost"
+          style="color: var(--accent-red); border-color: rgba(229,9,20,0.3)"
+          @click="claimHost"
+          title="Take over host controls"
+        >
+          Claim Host
+        </button>
+      </div>
+
+    </div><!-- .control-bar -->
+
+  </div><!-- .main-panel -->
+
+  <!-- ═══════════════════════════════════════════════════════════
+       SIDEBAR — Participants + Chat  (~25% width)
+  ═══════════════════════════════════════════════════════════ -->
+  <div class="sidebar">
+
+    <!-- ── Participants Block ── -->
+    <div class="participants-block">
+      <div class="block-header">
+        <span class="block-title">Participants</span>
+        <span class="count-badge">{{ onlineUsers.length }}</span>
+      </div>
+      <div class="participants-list">
+
+        <div
+          class="p-item"
+          v-for="user in onlineUsers"
+          :key="user.key"
+        >
+          <!-- Coloured initial avatar -->
+          <div class="p-avatar" :style="{ background: colorOf(user.username) }">
+            {{ user.username.charAt(0).toUpperCase() }}
+          </div>
+          <div class="p-info">
+            <div class="p-name">
+              {{ user.username }}
+              <span class="p-name-tag" v-if="user.isHost">HOST</span>
+              <span class="p-name-you" v-if="user.username === nickname">(you)</span>
+            </div>
+            <div class="p-role">{{ user.isHost ? 'Hosting' : 'Watching' }}</div>
+          </div>
+          <div class="online-dot"></div>
+        </div>
+
+        <div class="empty-list" v-if="onlineUsers.length === 0">
+          Connecting to room…
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Chat Block ── -->
+    <div class="chat-block">
+
+      <div class="block-header" style="border-bottom:1px solid var(--border)">
+        <span class="block-title">Live Chat</span>
+      </div>
+
+      <!-- Scrollable messages -->
+      <div class="messages-area" ref="msgArea">
+        <div
+          class="msg"
+          v-for="m in messages"
+          :key="m.id"
+          :class="{ sys: m.type === 'system' }"
+        >
+          <!-- System message -->
+          <div v-if="m.type === 'system'" class="msg-body">{{ m.body }}</div>
+
+          <!-- Chat message -->
+          <template v-else>
+            <div class="msg-head">
+              <span
+                class="msg-author"
+                :class="{
+                  'is-me':   m.author === nickname,
+                  'is-host': m.isHost
+                }"
+              >{{ m.author }}</span>
+              <span class="msg-ts">{{ m.time }}</span>
+            </div>
+            <div class="msg-body">{{ m.body }}</div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Quick Emoji Reaction Buttons -->
+      <div class="emoji-strip">
+        <button
+          class="emoji-btn"
+          v-for="e in EMOJIS"
+          :key="e"
+          @click="react(e)"
+          :title="e"
+        >{{ e }}</button>
+      </div>
+
+      <!-- Message Input -->
+      <div class="chat-input-row">
+        <input
+          class="chat-field"
+          v-model="chatDraft"
+          placeholder="Message the room…"
+          maxlength="300"
+          @keydown.enter.prevent="sendMsg"
+        />
+        <button class="send-btn" @click="sendMsg" title="Send (Enter)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2.5"
+               stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
+
+    </div><!-- .chat-block -->
+
+  </div><!-- .sidebar -->
+
+  <!-- ── Toast Shelf ── -->
+  <div class="toast-shelf">
+    <div class="toast" v-for="t in toasts" :key="t.id">{{ t.msg }}</div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       EXIT CONFIRMATION MODAL
+  ═══════════════════════════════════════════════════════════ -->
+  <div class="overlay" v-if="showExitConfirm" @click.self="showExitConfirm = false">
+    <div class="confirm-modal">
+      <span class="confirm-icon">👋</span>
+      <div class="confirm-title">Leave the Party?</div>
+      <div class="confirm-sub">
+        You'll be disconnected from room <strong style="color:var(--text-primary);font-family:var(--font-mono)">{{ roomId }}</strong>.
+        {{ isHost ? 'Leaving as Host means peers will lose sync control until someone claims it.' : 'Your chat messages will stay visible to others.' }}
+      </div>
+      <div class="confirm-actions">
+        <button class="btn btn-ghost" @click="showExitConfirm = false">
+          Stay &amp; Watch
+        </button>
+        <button class="btn btn-primary" @click="leaveParty">
+          Leave Party
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       LEFT-PARTY LANDING SCREEN
+       Shown after the user confirms leaving the room
+  ═══════════════════════════════════════════════════════════ -->
+  <div class="left-screen" v-if="hasLeft">
+    <div class="left-screen-inner">
+      <div class="left-screen-brand">سَهرة <span>·</span> Sahra</div>
+      <span class="left-screen-emoji">🎬</span>
+      <div class="left-screen-title">You've left the party</div>
+      <div class="left-screen-sub">
+        Hope you enjoyed the watch!<br>
+        Start a fresh party or share your room link to invite friends again.
+      </div>
+      <div class="left-screen-actions">
+        <button class="btn btn-primary" @click="startNewParty">
+          ✨ &nbsp;Start a New Party
+        </button>
+        <button class="btn btn-ghost" @click="rejoinParty">
+          ↩ &nbsp;Rejoin Room {{ roomId }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- #app -->
+
+<!-- ════════════════════════════════════════════════════════════════════
+     APPLICATION SCRIPT
+════════════════════════════════════════════════════════════════════ -->
+<script>
+/* ═══════════════════════════════════════════════════════════════════
+   سَهرة (SAHRA) — Realtime Movie Watch Party
+   ───────────────────────────────────────────────────────────────────
+   Stack  : Vue 3 Composition API (CDN) + Supabase JS v2 (CDN)
+   Hosting: GitHub Pages, Netlify, Vercel — any static host
+   Sync   : Supabase Realtime Broadcast (playback) + Presence (users)
+
+   ▸ QUICK START
+     1. Create a free Supabase project at https://app.supabase.com
+     2. Enable the "Realtime" extension for your project
+     3. Replace SUPABASE_URL and SUPABASE_ANON_KEY below
+     4. Drop index.html in your GitHub repo → enable Pages → done ✓
+
+   ▸ HOW IT WORKS
+     · The first visitor becomes Host. Their play/pause/seek events are
+       broadcast to all peers in the same room (?room=XXXXXX).
+     · Peers only seek locally if their timeline drifts > 2 seconds,
+       preventing infinite sync feedback loops.
+     · Chat, emoji reactions, and participant presence flow through the
+       same Supabase channel using event-scoped broadcasts.
+═══════════════════════════════════════════════════════════════════ */
+
+// ── ─────────────────────────────────────────────────────────────────
+//  ▶  REPLACE THESE TWO VALUES WITH YOUR SUPABASE PROJECT CREDENTIALS
+// ── ─────────────────────────────────────────────────────────────────
+const SUPABASE_URL      = 'https://wmbxqwciyynyzqirgive.supabase.co/rest/v1/';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtYnhxd2NpeXlueXpxaXJnaXZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2MDM4MTAsImV4cCI6MjA5NTE3OTgxMH0.2d1X_joBt8jyOlnSvqmlYJ5Dd0w5ZB_0AP6BQcJHYVQ';
+
+// ── ─────────────────────────────────────────────────────────────────
+//  CONSTANTS
+// ── ─────────────────────────────────────────────────────────────────
+const DRIFT_THRESHOLD   = 2;    // seconds before we force-seek a peer
+const SEEK_DEBOUNCE_MS  = 450;  // ms to wait before broadcasting seek
+const QUICK_EMOJIS      = ['🔥', '😂', '❤️', '👏', '😱'];
+
+const AVATAR_PALETTE = [
+  '#7c3aed','#e50914','#0ea5e9','#f59e0b','#10b981',
+  '#ec4899','#6366f1','#14b8a6','#f97316','#d946ef',
+];
+
+// ── ─────────────────────────────────────────────────────────────────
+//  UTILITIES
+// ── ─────────────────────────────────────────────────────────────────
+const isDemoMode = () => SUPABASE_URL.includes('YOUR_PROJECT');
+
+function makeRoomId() {
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+function roomFromUrl() {
+  return new URLSearchParams(window.location.search).get('room');
+}
+
+function pushRoomToUrl(id) {
+  const u = new URL(window.location.href);
+  u.searchParams.set('room', id);
+  window.history.replaceState({}, '', u.toString());
+}
+
+function hhMm(ms) {
+  return new Date(ms).toLocaleTimeString('en-US', {
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+}
+
+function djb2(s) {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
+  return Math.abs(h);
+}
+
+function colorOf(username) {
+  return AVATAR_PALETTE[djb2(username) % AVATAR_PALETTE.length];
+}
+
+let _uid = 0;
+const uid = () => ++_uid;
+
+// ════════════════════════════════════════════════════════════════════
+//  VUE 3 APP
+// ════════════════════════════════════════════════════════════════════
+const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
+
+createApp({
+  setup() {
+
+    // ────────────────────────────────────────────────────────
+    //  ROOM & IDENTITY STATE
+    // ────────────────────────────────────────────────────────
+    const roomId   = ref('');
+    const nickname = ref('');
+    const isHost   = ref(false);
+    const showModal    = ref(false);
+    const nameInput    = ref('');
+    const nameInputRef = ref(null);
+
+    // true  → user arrived via a shared ?room= link (JOIN mode)
+    // false → room was auto-generated, this person is the creator
+    const wasInUrl = ref(false);
+
+    // Exit-party UI state
+    const showExitConfirm = ref(false);
+    const hasLeft         = ref(false);
+
+    // ────────────────────────────────────────────────────────
+    //  CONNECTION STATE
+    // ────────────────────────────────────────────────────────
+    const connStatus = ref('disconnected'); // 'connecting' | 'connected' | 'disconnected'
+
+    // ────────────────────────────────────────────────────────
+    //  VIDEO STATE
+    // ────────────────────────────────────────────────────────
+    const videoEl      = ref(null);
+    const videoWrapper = ref(null);
+    const videoSrc     = ref('');
+    const urlInput     = ref('');
+    const videoTitle   = ref('');
+    const syncPulse    = ref(false);
+
+    // Prevents our own video event handlers from re-broadcasting
+    // when we programmatically apply a remote command
+    let remoteApply   = false;
+    let seekTimer     = null;
+    let syncPulseTimer = null;
+
+    // ────────────────────────────────────────────────────────
+    //  PRESENCE / PARTICIPANTS
+    // ────────────────────────────────────────────────────────
+    const onlineUsers = ref([]); // Array<{ key, username, isHost }>
+
+    // ────────────────────────────────────────────────────────
+    //  CHAT
+    // ────────────────────────────────────────────────────────
+    const messages  = ref([]);
+    const chatDraft = ref('');
+    const msgArea   = ref(null);
+    const EMOJIS    = QUICK_EMOJIS;
+
+    // ────────────────────────────────────────────────────────
+    //  FLOATING EMOJI LAYER
+    // ────────────────────────────────────────────────────────
+    const floaters  = ref([]); // Array<{ id, char, x }>
+
+    // ────────────────────────────────────────────────────────
+    //  UI / TOASTS
+    // ────────────────────────────────────────────────────────
+    const linkCopied = ref(false);
+    const toasts     = ref([]);
+
+    const fullRoomUrl = computed(() => {
+      const u = new URL(window.location.href);
+      u.searchParams.set('room', roomId.value);
+      return u.toString();
+    });
+
+    // ────────────────────────────────────────────────────────
+    //  SUPABASE REFS
+    // ────────────────────────────────────────────────────────
+    let sb      = null; // Supabase client
+    let channel = null; // Realtime channel
+
+    // ════════════════════════════════════════════════════════
+    //  BOOTSTRAP — runs on mount
+    // ════════════════════════════════════════════════════════
+    onMounted(async () => {
+      // 1. Resolve or generate room ID
+      //    wasInUrl = true means a friend shared this link → JOIN mode
+      let rid = roomFromUrl();
+      if (rid) {
+        wasInUrl.value = true;          // arriving via shared link → JOIN
+      } else {
+        rid = makeRoomId();             // brand-new session → CREATE
+        pushRoomToUrl(rid);
+      }
+      roomId.value = rid;
+
+      // 2. Check for saved nickname
+      const saved = localStorage.getItem('sahra_nick');
+      if (saved) {
+        nickname.value = saved;
+        await boot();
+      } else {
+        showModal.value = true;
+        await nextTick();
+        nameInputRef.value?.focus();
+      }
+    });
+
+    onUnmounted(teardown);
+
+    // ── Confirm nickname from modal
+    async function confirmName() {
+      const n = nameInput.value.trim();
+      if (!n) return;
+      nickname.value = n;
+      localStorage.setItem('sahra_nick', n);
+      showModal.value = false;
+      await boot();
+    }
+
+    // ── Full app boot after we have a nickname
+    async function boot() {
+      // First visitor to this session claims host
+      const hk = `sahra_host_${roomId.value}`;
+      if (!sessionStorage.getItem(hk)) {
+        isHost.value = true;
+        sessionStorage.setItem(hk, '1');
+      }
+
+      sysMsg(`You joined room ${roomId.value} as ${isHost.value ? 'Host ⚡' : 'Viewer 👁'}`);
+
+      if (isDemoMode()) {
+        // ── Demo / offline mode: UI works, no real sync ──
+        connStatus.value  = 'connected';
+        onlineUsers.value = [{
+          key: nickname.value,
+          username: nickname.value,
+          isHost: isHost.value,
+        }];
+        sysMsg('⚠ Running in demo mode. Add Supabase credentials for real-time sync.');
+      } else {
+        sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        await joinChannel();
+      }
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  SUPABASE CHANNEL — single channel per room
+    // ════════════════════════════════════════════════════════
+    async function joinChannel() {
+      connStatus.value = 'connecting';
+
+      /*
+       * One channel: `sahra:room:<ROOM_ID>`
+       * Presence  → participant list
+       * Broadcast `playback_control` → video sync
+       * Broadcast `chat_message`     → chat
+       * Broadcast `emoji_reaction`   → floating emojis
+       */
+      channel = sb.channel(`sahra:room:${roomId.value}`, {
+        config: {
+          presence:  { key: nickname.value },
+          broadcast: { self: false },   // don't echo our own broadcasts back to us
+        },
+      });
+
+      // ── Presence: full sync ──────────────────────────────
+      channel.on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+        onlineUsers.value = Object.entries(state).map(([key, slots]) => ({
+          key,
+          username: slots[0]?.username ?? key,
+          isHost:   slots[0]?.isHost   ?? false,
+        }));
+      });
+
+      channel.on('presence', { event: 'join' }, ({ key, newPresences }) => {
+        const who = newPresences[0]?.username ?? key;
+        if (who !== nickname.value) sysMsg(`${who} joined the room`);
+      });
+
+      channel.on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+        const who = leftPresences[0]?.username ?? key;
+        sysMsg(`${who} left the room`);
+      });
+
+      // ── Broadcast: playback_control ──────────────────────
+      channel.on('broadcast', { event: 'playback_control' }, ({ payload }) => {
+        applyRemote(payload);
+      });
+
+      // ── Broadcast: chat_message ──────────────────────────
+      channel.on('broadcast', { event: 'chat_message' }, ({ payload }) => {
+        pushMsg({
+          id:     uid(),
+          type:   'chat',
+          author: payload.user,
+          body:   payload.text,
+          time:   hhMm(payload.ts),
+          isHost: payload.isHost ?? false,
+        });
+      });
+
+      // ── Broadcast: emoji_reaction ────────────────────────
+      channel.on('broadcast', { event: 'emoji_reaction' }, ({ payload }) => {
+        spawnEmoji(payload.emoji);
+      });
+
+      // ── Subscribe then begin presence tracking ───────────
+      await channel.subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          connStatus.value = 'connected';
+          await channel.track({
+            username: nickname.value,
+            isHost:   isHost.value,
+          });
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          connStatus.value = 'disconnected';
+          sysMsg('⚠ Connection lost — retrying…');
+        } else if (status === 'CLOSED') {
+          connStatus.value = 'disconnected';
+        }
+      });
+    }
+
+    async function teardown() {
+      if (channel) {
+        await channel.untrack().catch(() => {});
+        await sb?.removeChannel(channel).catch(() => {});
+        channel = null;
+      }
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  VIDEO — Host event handlers
+    // ════════════════════════════════════════════════════════
+
+    /** Called by the native `play` event */
+    function onPlay() {
+      if (!isHost.value || remoteApply) return;
+      emit('playback_control', { action: 'play',  ts: videoEl.value?.currentTime ?? 0 });
+    }
+
+    /** Called by the native `pause` event */
+    function onPause() {
+      if (!isHost.value || remoteApply) return;
+      emit('playback_control', { action: 'pause', ts: videoEl.value?.currentTime ?? 0 });
+    }
+
+    /** Called by the native `seeked` event — debounced to avoid flooding */
+    function onSeeked() {
+      if (!isHost.value || remoteApply) return;
+      clearTimeout(seekTimer);
+      seekTimer = setTimeout(() => {
+        emit('playback_control', { action: 'seek', ts: videoEl.value?.currentTime ?? 0 });
+      }, SEEK_DEBOUNCE_MS);
+    }
+
+    /** Force-sync all peers to current playback position (manual Host action) */
+    function forceSyncPeers() {
+      if (!isHost.value) return;
+      const v = videoEl.value;
+      if (!v) return;
+      const action = v.paused ? 'pause' : 'play';
+      emit('playback_control', { action, ts: v.currentTime });
+      toast('Sync broadcast sent to all viewers');
+    }
+
+    // ── Apply a remote playback command (peers only, never fired on host) ──
+    function applyRemote({ action, ts }) {
+      const v = videoEl.value;
+      if (!v) return;
+
+      flashSync();
+
+      remoteApply = true;
+
+      const drift = Math.abs(v.currentTime - ts);
+
+      if (action === 'play') {
+        // Only seek if we're meaningfully out of sync
+        if (drift > DRIFT_THRESHOLD) v.currentTime = ts;
+        v.play().catch(() => {});
+      } else if (action === 'pause') {
+        if (drift > DRIFT_THRESHOLD) v.currentTime = ts;
+        v.pause();
+      } else if (action === 'seek') {
+        // Host explicitly scrubbed — always honour
+        v.currentTime = ts;
+      }
+
+      // Release the flag after events have settled
+      setTimeout(() => { remoteApply = false; }, 650);
+    }
+
+    function flashSync() {
+      syncPulse.value = true;
+      clearTimeout(syncPulseTimer);
+      syncPulseTimer = setTimeout(() => { syncPulse.value = false; }, 1300);
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  VIDEO SOURCE
+    // ════════════════════════════════════════════════════════
+    function loadVideo() {
+      const u = urlInput.value.trim();
+      if (!u) return;
+      videoSrc.value   = u;
+      videoTitle.value = decodeURIComponent(u.split('/').pop().split('?')[0]) || u;
+      toast('Media source loaded');
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  CHAT
+    // ════════════════════════════════════════════════════════
+    function sendMsg() {
+      const text = chatDraft.value.trim();
+      if (!text) return;
+
+      const payload = {
+        user:   nickname.value,
+        text,
+        ts:     Date.now(),
+        isHost: isHost.value,
+      };
+
+      // Optimistic local append
+      pushMsg({
+        id:     uid(),
+        type:   'chat',
+        author: payload.user,
+        body:   payload.text,
+        time:   hhMm(payload.ts),
+        isHost: payload.isHost,
+      });
+
+      // Broadcast to peers
+      emit('chat_message', payload);
+      chatDraft.value = '';
+    }
+
+    function pushMsg(m) {
+      messages.value.push(m);
+      nextTick(() => {
+        if (msgArea.value) msgArea.value.scrollTop = msgArea.value.scrollHeight;
+      });
+    }
+
+    function sysMsg(text) {
+      pushMsg({ id: uid(), type: 'system', body: text });
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  EMOJI REACTIONS
+    // ════════════════════════════════════════════════════════
+    function react(emoji) {
+      // Immediate local spawn
+      spawnEmoji(emoji);
+      // Broadcast to peers
+      emit('emoji_reaction', { emoji, user: nickname.value });
+    }
+
+    function spawnEmoji(char) {
+      const w   = videoWrapper.value?.clientWidth ?? 400;
+      const x   = Math.floor(Math.random() * (w - 50)) + 10;
+      const id  = uid();
+      floaters.value.push({ id, char, x });
+      setTimeout(() => {
+        const i = floaters.value.findIndex(f => f.id === id);
+        if (i !== -1) floaters.value.splice(i, 1);
+      }, 2300); // slightly longer than animation duration
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  HOST MANAGEMENT
+    // ════════════════════════════════════════════════════════
+    async function claimHost() {
+      isHost.value = true;
+      sessionStorage.setItem(`sahra_host_${roomId.value}`, '1');
+      sysMsg(`${nickname.value} claimed host controls`);
+      toast('You are now the Host — your playback is synced to all peers');
+
+      // Update presence so sidebar shows the HOST badge
+      if (channel) {
+        await channel.track({ username: nickname.value, isHost: true });
+      }
+
+      // Announce in chat
+      emit('chat_message', {
+        user:   '⚡ Room',
+        text:   `${nickname.value} is now the Host`,
+        ts:     Date.now(),
+        isHost: false,
+      });
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  LEAVE / REJOIN / NEW PARTY
+    // ════════════════════════════════════════════════════════
+
+    /**
+     * Confirmed leave: untrack presence, tear down channel,
+     * clear host session flag, and show the left-party screen.
+     */
+    async function leaveParty() {
+      showExitConfirm.value = false;
+
+      // Announce departure in chat before disconnecting
+      emit('chat_message', {
+        user:   '👋 Room',
+        text:   `${nickname.value} left the party`,
+        ts:     Date.now(),
+        isHost: false,
+      });
+
+      // Small delay so the broadcast goes out before teardown
+      await new Promise(r => setTimeout(r, 180));
+      await teardown();
+
+      // Clear host claim so a future visitor can become host
+      sessionStorage.removeItem(`sahra_host_${roomId.value}`);
+
+      hasLeft.value = true;
+    }
+
+    /**
+     * Rejoin the same room — clears the left screen and
+     * re-runs the boot sequence without reloading the page.
+     */
+    async function rejoinParty() {
+      hasLeft.value = false;
+      // Re-run boot (will re-subscribe to channel, re-track presence)
+      await boot();
+    }
+
+    /**
+     * Discard current room, generate a fresh one, and reload.
+     * We use a full page reload so all state is cleanly reset.
+     */
+    function startNewParty() {
+      const newId = makeRoomId();
+      const u = new URL(window.location.href);
+      u.searchParams.set('room', newId);
+      window.location.href = u.toString(); // full reload → clean slate
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  ROOM LINK
+    // ════════════════════════════════════════════════════════
+    async function copyLink() {
+      try {
+        await navigator.clipboard.writeText(fullRoomUrl.value);
+        linkCopied.value = true;
+        setTimeout(() => { linkCopied.value = false; }, 2200);
+        toast('Room link copied!');
+      } catch {
+        toast('Could not copy — please copy manually from the field');
+      }
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  TOASTS
+    // ════════════════════════════════════════════════════════
+    let tid = 0;
+    function toast(msg, ms = 3200) {
+      const id = ++tid;
+      toasts.value.push({ id, msg });
+      setTimeout(() => {
+        const i = toasts.value.findIndex(t => t.id === id);
+        if (i !== -1) toasts.value.splice(i, 1);
+      }, ms);
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  SUPABASE EMIT HELPER
+    // ════════════════════════════════════════════════════════
+    function emit(event, payload) {
+      if (!channel || isDemoMode()) return;
+      channel.send({ type: 'broadcast', event, payload }).catch(console.error);
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  TEMPLATE BINDINGS
+    // ════════════════════════════════════════════════════════
+    return {
+      // Room & identity
+      roomId, nickname, isHost, fullRoomUrl, EMOJIS,
+      // Modal (create vs join)
+      showModal, wasInUrl, nameInput, nameInputRef, confirmName,
+      // Connection
+      connStatus,
+      // Video
+      videoEl, videoWrapper, videoSrc, urlInput, videoTitle, syncPulse,
+      onPlay, onPause, onSeeked, loadVideo, forceSyncPeers,
+      // Participants
+      onlineUsers, colorOf,
+      // Chat
+      messages, chatDraft, msgArea, sendMsg,
+      // Emoji
+      floaters, react,
+      // UI / toasts
+      linkCopied, toasts, copyLink, claimHost,
+      // Leave / exit
+      showExitConfirm, hasLeft, leaveParty, rejoinParty, startNewParty,
+    };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
