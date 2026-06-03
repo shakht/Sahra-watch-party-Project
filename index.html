@@ -996,6 +996,140 @@
     }
 
     /* ════════════════════════════════════════════════════════════
+       LIVE TV — Channel Picker
+    ════════════════════════════════════════════════════════════ */
+    .tv-panel {
+      border-top: 1px solid var(--border);
+      background: var(--bg-base);
+      flex-shrink: 0;
+      overflow: hidden;
+      transition: max-height 0.28s ease;
+    }
+    .tv-panel.collapsed { max-height: 0; border-top: none; }
+    .tv-panel.expanded  { max-height: 320px; }
+
+    .tv-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 18px 6px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .tv-panel-title {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .tv-live-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-red);
+      box-shadow: 0 0 6px var(--accent-red);
+      animation: pulse-dot 1.4s ease-in-out infinite;
+    }
+    .tv-close-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 2px 5px;
+      line-height: 1;
+      border-radius: 4px;
+      transition: all var(--transition);
+    }
+    .tv-close-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+    .tv-channel-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      padding: 10px 18px 14px;
+      overflow-y: auto;
+      max-height: 260px;
+    }
+    .tv-channel-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+      padding: 9px 12px 8px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all var(--transition);
+      min-width: 80px;
+      text-align: center;
+    }
+    .tv-channel-card:hover {
+      background: var(--bg-hover);
+      border-color: var(--text-muted);
+      transform: translateY(-1px);
+    }
+    .tv-channel-card.active {
+      border-color: var(--accent-red);
+      background: rgba(229, 9, 20, 0.08);
+      box-shadow: 0 0 12px rgba(229, 9, 20, 0.15);
+    }
+    .tv-channel-icon {
+      font-size: 22px;
+      line-height: 1;
+    }
+    .tv-channel-name {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+    .tv-channel-card.active .tv-channel-name { color: var(--accent-red); }
+
+    /* ── Server switcher strip ── */
+    .server-strip {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+    .server-btn {
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      padding: 4px 9px;
+      cursor: pointer;
+      transition: all var(--transition);
+      letter-spacing: 0.04em;
+    }
+    .server-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .server-btn.active {
+      background: rgba(229, 9, 20, 0.12);
+      border-color: var(--accent-red);
+      color: var(--accent-red);
+    }
+    .server-btn.retrying {
+      animation: pulse-dot 0.7s ease-in-out infinite;
+    }
+    .server-hint {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+    .tv-channel-cat {
+      font-size: 9px;
+      color: var(--text-muted);
+      letter-spacing: 0.06em;
+    }
+
+    /* ════════════════════════════════════════════════════════════
        RESPONSIVE CLAMPS
     ════════════════════════════════════════════════════════════ */
     @media (max-width: 780px) {
@@ -1120,6 +1254,7 @@
         @play="onPlay"
         @pause="onPause"
         @seeked="onSeeked"
+        @error="onVideoError"
       ></video>
 
       <!-- ② YouTube IFrame player mount point
@@ -1202,6 +1337,13 @@
           @keydown.enter="loadVideo"
         />
         <button class="btn btn-ghost" @click="loadVideo">Load</button>
+        <button
+          class="btn"
+          :class="showChannelPicker ? 'btn-primary' : 'btn-ghost'"
+          @click="showChannelPicker = !showChannelPicker"
+          title="Browse live TV channels"
+          style="gap:5px"
+        >📺 Live TV</button>
         <!-- Sync button: always visible for Host once a video is loaded.
              Label and behaviour change based on video type. -->
         <button
@@ -1230,6 +1372,25 @@
         </button>
       </div>
 
+      <!-- Row 1c: Server switcher — shown when a live TV channel is active -->
+      <div class="ctrl-row" v-if="activeChannel">
+        <span class="ctrl-label">{{ activeChannel }}</span>
+        <div class="server-strip">
+          <button
+            v-for="(srv, i) in (_currentTvChannelRef ? _currentTvChannelRef.servers : [])"
+            :key="i"
+            class="server-btn"
+            :class="{ active: activeServerIndex === i, retrying: serverRetrying && activeServerIndex === i }"
+            @click="switchServer(i)"
+            :title="srv"
+          >S{{ i + 1 }}</button>
+        </div>
+        <span class="server-hint" v-if="serverRetrying">Switching…</span>
+        <button class="btn btn-ghost" style="font-size:10px;padding:6px 10px" @click="tryNextServer" title="Try next server">
+          Next Server →
+        </button>
+      </div>
+
       <!-- Row 2: Room share link -->
       <div class="ctrl-row">
         <span class="ctrl-label">Room Link</span>
@@ -1250,6 +1411,31 @@
       </div>
 
     </div><!-- .control-bar -->
+
+    <!-- ── Live TV Channel Picker Panel ── -->
+    <div class="tv-panel" :class="showChannelPicker ? 'expanded' : 'collapsed'">
+      <div class="tv-panel-header">
+        <div class="tv-panel-title">
+          <div class="tv-live-dot"></div>
+          Live TV Channels
+        </div>
+        <button class="tv-close-btn" @click="showChannelPicker = false">✕</button>
+      </div>
+      <div class="tv-channel-grid">
+        <div
+          class="tv-channel-card"
+          v-for="ch in TV_CHANNELS"
+          :key="ch.name"
+          :class="{ active: activeChannel === ch.name }"
+          @click="loadChannel(ch)"
+          :title="ch.name"
+        >
+          <div class="tv-channel-icon">{{ ch.icon }}</div>
+          <div class="tv-channel-name">{{ ch.name }}</div>
+          <div class="tv-channel-cat">{{ ch.cat }}</div>
+        </div>
+      </div>
+    </div>
 
   </div><!-- .main-panel -->
 
@@ -1453,6 +1639,144 @@ const DRIFT_THRESHOLD   = 2;    // seconds before we force-seek a peer
 const SEEK_DEBOUNCE_MS  = 450;  // ms to wait before broadcasting seek
 const QUICK_EMOJIS      = ['🔥', '😂', '❤️', '👏', '😱'];
 
+const TV_CHANNELS = [
+  {
+    name: 'MBC 1', icon: '⭐', cat: 'General',
+    servers: [
+      'https://shls-mbc1-prod-dub.akamaized.net/out/u/mbc1.m3u8',
+      'https://shls-mbc1-prod-fra.akamaized.net/out/u/mbc1.m3u8',
+      'https://cdn-live.mbc.net/mbc1/playlist.m3u8',
+      'https://www.youtube.com/@MBC1/live',
+    ],
+  },
+  {
+    name: 'MBC 2', icon: '🎬', cat: 'Movies',
+    servers: [
+      'https://shls-mbc2-prod-dub.akamaized.net/out/u/mbc2.m3u8',
+      'https://shls-mbc2-prod-fra.akamaized.net/out/u/mbc2.m3u8',
+      'https://cdn-live.mbc.net/mbc2/playlist.m3u8',
+      'https://www.youtube.com/@MBC2Hollywood/live',
+    ],
+  },
+  {
+    name: 'MBC Action', icon: '💥', cat: 'Action',
+    servers: [
+      'https://shls-mbc-action-prod-dub.akamaized.net/out/u/mbc-action.m3u8',
+      'https://shls-mbc-action-prod-fra.akamaized.net/out/u/mbc-action.m3u8',
+      'https://cdn-live.mbc.net/mbcaction/playlist.m3u8',
+      'https://www.youtube.com/@MBCAction/live',
+    ],
+  },
+  {
+    name: 'MBC Drama', icon: '🎭', cat: 'Drama',
+    servers: [
+      'https://shls-mbc-drama-prod-dub.akamaized.net/out/u/mbc-drama.m3u8',
+      'https://shls-mbc-drama-prod-fra.akamaized.net/out/u/mbc-drama.m3u8',
+      'https://cdn-live.mbc.net/mbcdrama/playlist.m3u8',
+      'https://www.youtube.com/@MBCDrama/live',
+    ],
+  },
+  {
+    name: 'MBC 4', icon: '📺', cat: 'Series',
+    servers: [
+      'https://shls-mbc4-prod-dub.akamaized.net/out/u/mbc4.m3u8',
+      'https://shls-mbc4-prod-fra.akamaized.net/out/u/mbc4.m3u8',
+      'https://cdn-live.mbc.net/mbc4/playlist.m3u8',
+      'https://www.youtube.com/@MBC4Arabia/live',
+    ],
+  },
+  {
+    name: 'MBC Masr', icon: '🇪🇬', cat: 'Egypt',
+    servers: [
+      'https://shls-mbc-masr-prod-dub.akamaized.net/out/u/mbc-masr.m3u8',
+      'https://shls-mbc-masr-prod-fra.akamaized.net/out/u/mbc-masr.m3u8',
+      'https://cdn-live.mbc.net/mbcmasr/playlist.m3u8',
+      'https://www.youtube.com/@MBCMasr/live',
+    ],
+  },
+  {
+    name: 'MBC Masr 2', icon: '🌙', cat: 'Egypt',
+    servers: [
+      'https://shls-mbc-masr2-prod-dub.akamaized.net/out/u/mbc-masr2.m3u8',
+      'https://shls-mbc-masr2-prod-fra.akamaized.net/out/u/mbc-masr2.m3u8',
+      'https://cdn-live.mbc.net/mbcmasr2/playlist.m3u8',
+      'https://www.youtube.com/@MBCMasr2/live',
+    ],
+  },
+  {
+    name: 'FOX Movies', icon: '🦊', cat: 'Movies',
+    servers: [
+      'https://foxmoviesme.akamaized.net/hls/live/foxmovies/index.m3u8',
+      'https://edge01.foxmoviesme.com/live/foxmovies/index.m3u8',
+      'https://cdn-live.foxmoviesme.com/foxmovies/playlist.m3u8',
+      'https://www.youtube.com/@FOXMoviesArabia/live',
+    ],
+  },
+  {
+    name: 'Rotana Cinema', icon: '🎞️', cat: 'Cinema',
+    servers: [
+      'https://rotana.akamaized.net/hls/live/rotanacinema/index.m3u8',
+      'https://edge01.rotana.net/live/rotanacinema/index.m3u8',
+      'https://cdn-live.rotana.net/rotanacinema/playlist.m3u8',
+      'https://www.youtube.com/@RotanaCinema/live',
+    ],
+  },
+  {
+    name: 'Rotana Khalijia', icon: '🌟', cat: 'Music',
+    servers: [
+      'https://rotana.akamaized.net/hls/live/rotanakhalijia/index.m3u8',
+      'https://edge01.rotana.net/live/rotanakhalijia/index.m3u8',
+      'https://cdn-live.rotana.net/rotanakhalijia/playlist.m3u8',
+      'https://www.youtube.com/@RotanaKhalijia/live',
+    ],
+  },
+  {
+    name: 'Al Jazeera', icon: '📡', cat: 'News',
+    servers: [
+      'https://live-hls-web-aja.getaj.net/AJA/index.m3u8',
+      'https://live-hls-web-aja-fast.getaj.net/AJA/index.m3u8',
+      'https://aljazeera-eng-hd-live.samsung.fastly.net/hls/live/aljazeeraeng/index.m3u8',
+      'https://www.youtube.com/@AlJazeera/live',
+    ],
+  },
+  {
+    name: 'Al Arabiya', icon: '📰', cat: 'News',
+    servers: [
+      'https://alarabiya.akamaized.net/hls/live/alarabiya/index.m3u8',
+      'https://live-edge01.alarabiya.net/alarabiya/index.m3u8',
+      'https://cdn-live.alarabiya.net/alarabiya/playlist.m3u8',
+      'https://www.youtube.com/@AlArabiya/live',
+    ],
+  },
+  {
+    name: 'Dubai TV', icon: '🏙️', cat: 'General',
+    servers: [
+      'https://dubaitv.akamaized.net/hls/live/dubaitv/index.m3u8',
+      'https://live-edge01.dubaitv.ae/dubaitv/index.m3u8',
+      'https://cdn-live.dubaitv.ae/dubaitv/playlist.m3u8',
+      'https://www.youtube.com/@dubaitv/live',
+    ],
+  },
+  {
+    name: 'beIN Sports 1', icon: '⚽', cat: 'Sports',
+    servers: [
+      'https://bein-sports.akamaized.net/hls/live/beinsports1/index.m3u8',
+      'https://edge01.beinsports.com/live/beinsports1/index.m3u8',
+      'https://cdn-live.beinsports.com/bs1/playlist.m3u8',
+      'https://www.youtube.com/@beINSPORTS_EN/live',
+    ],
+  },
+  {
+    name: 'Saudi TV 1', icon: '🇸🇦', cat: 'General',
+    servers: [
+      'https://sauditv.akamaized.net/hls/live/sauditv1/index.m3u8',
+      'https://live-edge01.sauditv.sa/sauditv1/index.m3u8',
+      'https://cdn-live.sauditv.sa/tv1/playlist.m3u8',
+      'https://www.youtube.com/@sauditv1/live',
+    ],
+  },
+];
+
 const AVATAR_PALETTE = [
   '#7c3aed','#e50914','#0ea5e9','#f59e0b','#10b981',
   '#ec4899','#6366f1','#14b8a6','#f97316','#d946ef',
@@ -1590,6 +1914,14 @@ createApp({
     // Sync Point: host manually types their current playback position
     // so peers know where to seek before the 3-2-1 countdown fires
     const syncTimeInput = ref('');
+
+    // ────────────────────────────────────────────────────────
+    //  LIVE TV
+    // ────────────────────────────────────────────────────────
+    const showChannelPicker  = ref(false);
+    const activeChannel      = ref('');      // channel name currently tuned
+    const activeServerIndex  = ref(0);       // which server (0-3) is active
+    const serverRetrying     = ref(false);   // true while auto-switching servers
 
     // Computed HTML string for the iframe notice bar
     // (uses v-html so <strong> renders correctly)
@@ -2098,6 +2430,47 @@ createApp({
     }
 
     // ════════════════════════════════════════════════════════
+    //  LIVE TV — multi-server with auto-fallback
+    // ════════════════════════════════════════════════════════
+    const _currentTvChannelRef = ref(null); // reactive so template can read servers list
+
+    function loadChannel(ch, serverIdx = 0) {
+      _currentTvChannelRef.value  = ch;
+      activeChannel.value         = ch.name;
+      activeServerIndex.value     = serverIdx;
+      serverRetrying.value        = false;
+      showChannelPicker.value     = false;
+
+      urlInput.value = ch.servers[serverIdx];
+      loadVideo();
+      sysMsg(`📺 ${ch.name} — Server ${serverIdx + 1} of ${ch.servers.length}`);
+    }
+
+    function switchServer(idx) {
+      if (!_currentTvChannelRef.value) return;
+      loadChannel(_currentTvChannelRef.value, idx);
+    }
+
+    function tryNextServer() {
+      const ch = _currentTvChannelRef.value;
+      if (!ch) return;
+      const next = activeServerIndex.value + 1;
+      if (next >= ch.servers.length) {
+        toast(`All ${ch.servers.length} servers tried for ${ch.name}`);
+        return;
+      }
+      serverRetrying.value = true;
+      toast(`Server ${activeServerIndex.value + 1} failed — trying Server ${next + 1}…`);
+      loadChannel(ch, next);
+    }
+
+    // Called by the native <video> error event — auto-fallback to next server
+    function onVideoError() {
+      if (!_currentTvChannelRef.value) return;
+      tryNextServer();
+    }
+
+    // ════════════════════════════════════════════════════════
     //  CHAT
     // ════════════════════════════════════════════════════════
     function sendMsg() {
@@ -2270,6 +2643,9 @@ createApp({
     //  TEMPLATE BINDINGS
     // ════════════════════════════════════════════════════════
     return {
+      // Live TV
+      TV_CHANNELS, showChannelPicker, activeChannel, loadChannel,
+      _currentTvChannelRef, activeServerIndex, serverRetrying, switchServer, tryNextServer,
       // Room & identity
       roomId, nickname, isHost, fullRoomUrl, EMOJIS,
       // Modal (create vs join)
