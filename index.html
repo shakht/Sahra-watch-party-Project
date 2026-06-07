@@ -9,9 +9,14 @@
        CDN DEPENDENCIES
        Vue 3 (Composition API, no build step)
        Supabase JS v2 (Realtime Broadcast + Presence)
+       Video.js 8 (HLS + subtitle/CC track support)
   ═══════════════════════════════════════════════════════════ -->
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <link  href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+  <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+  <!-- Cairo: supports Arabic + Latin in one font -->
+  <link  href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
   <style>
     /* ════════════════════════════════════════════════════════════
@@ -45,7 +50,7 @@
       height: 100%;
       background: var(--bg-base);
       color: var(--text-primary);
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: 'Cairo', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       font-size: 14px;
       line-height: 1.5;
       overflow: hidden;
@@ -996,6 +1001,84 @@
     }
 
     /* ════════════════════════════════════════════════════════════
+       VIDEO.JS — Dark theme overrides
+    ════════════════════════════════════════════════════════════ */
+    /* Fill the entire video-wrapper */
+    .video-js { width: 100% !important; height: 100% !important; }
+
+    /* Big play button → red circle */
+    .video-js .vjs-big-play-button {
+      background: rgba(229, 9, 20, 0.72);
+      border: 2px solid rgba(229, 9, 20, 0.55);
+      border-radius: 50%;
+      width: 62px; height: 62px; line-height: 62px;
+      top: 50%; left: 50%;
+      margin-top: -31px; margin-left: -31px;
+      transition: background 0.18s ease, transform 0.18s ease;
+    }
+    .video-js:hover .vjs-big-play-button,
+    .video-js .vjs-big-play-button:focus {
+      background: var(--accent-red);
+      transform: scale(1.08);
+    }
+    .video-js .vjs-icon-placeholder::before { line-height: 62px; }
+
+    /* Control bar */
+    .video-js .vjs-control-bar {
+      background: linear-gradient(transparent, rgba(0, 0, 0, 0.82));
+      height: 42px;
+      padding: 0 6px;
+    }
+    /* Progress / seek bar */
+    .video-js .vjs-play-progress,
+    .video-js .vjs-play-progress::before { background: var(--accent-red); }
+    .video-js .vjs-slider { background: rgba(255,255,255,0.14); border-radius: 2px; }
+    .video-js .vjs-load-progress,
+    .video-js .vjs-load-progress div { background: rgba(255,255,255,0.1); }
+    /* Volume */
+    .video-js .vjs-volume-level { background: var(--accent-red); }
+    /* Tooltip / time display */
+    .video-js .vjs-time-tooltip,
+    .video-js .vjs-mouse-display { background: var(--accent-red); border-radius: 4px; }
+    /* Menus (playback rate, CC language) */
+    .video-js .vjs-menu-button-popup .vjs-menu { bottom: 2.4em; }
+    .video-js .vjs-menu li.vjs-selected,
+    .video-js .vjs-menu li.vjs-selected:focus,
+    .video-js .vjs-menu li.vjs-selected:hover { background: var(--accent-red); }
+    /* Subtitle / CC cue styles */
+    .video-js .vjs-text-track-display { bottom: 52px; }
+    ::cue {
+      background: rgba(0, 0, 0, 0.72);
+      color: #fff;
+      font-size: 1rem;
+      font-family: inherit;
+      border-radius: 3px;
+      padding: 2px 6px;
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       SUBTITLE LANGUAGE BADGE (shown in topbar while CC is active)
+    ════════════════════════════════════════════════════════════ */
+    .cc-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 4px 9px;
+      border-radius: 20px;
+      border: 1px solid rgba(124, 58, 237, 0.5);
+      background: rgba(124, 58, 237, 0.1);
+      color: var(--accent-purple);
+      white-space: nowrap;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+    .cc-badge:hover { background: rgba(124, 58, 237, 0.2); }
+
+    /* ════════════════════════════════════════════════════════════
        LIVE TV — Channel Picker
     ════════════════════════════════════════════════════════════ */
     .tv-panel {
@@ -1130,6 +1213,37 @@
     }
 
     /* ════════════════════════════════════════════════════════════
+       RTL — Arabic layout fixes
+    ════════════════════════════════════════════════════════════ */
+    /* Flip the sidebar border */
+    [dir="rtl"] .main-panel { border-right: none; border-left: 1px solid var(--border); }
+    /* Language toggle button */
+    .lang-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all var(--transition);
+      white-space: nowrap;
+      font-family: 'Cairo', inherit;
+    }
+    .lang-btn:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--text-muted); }
+    /* Arabic text in chat messages — auto-detected */
+    .msg-body[dir="rtl"] { text-align: right; font-size: 14px; }
+    /* Flip ctrl-row gap direction in RTL */
+    [dir="rtl"] .modal-room-hint { direction: ltr; text-align: right; }
+    /* Keep room IDs / URLs always LTR even in RTL mode */
+    .ltr-always { direction: ltr; unicode-bidi: embed; }
+
+    /* ════════════════════════════════════════════════════════════
        RESPONSIVE CLAMPS
     ════════════════════════════════════════════════════════════ */
     @media (max-width: 780px) {
@@ -1139,7 +1253,7 @@
   </style>
 </head>
 <body>
-<div id="app">
+<div id="app" :dir="isRTL ? 'rtl' : 'ltr'" :lang="lang">
 
   <!-- ═══════════════════════════════════════════════════════════
        NICKNAME MODAL — Create Party (host) OR Join Party (guest)
@@ -1151,40 +1265,34 @@
       <!-- ── Mode pill: CREATE vs JOIN ── -->
       <div class="modal-mode-pill" :class="wasInUrl ? 'join' : 'create'">
         <span>{{ wasInUrl ? '🎬' : '✨' }}</span>
-        {{ wasInUrl ? 'Join Watch Party' : 'Create Watch Party' }}
+        {{ wasInUrl ? t('joinParty') : t('createParty') }}
       </div>
 
       <!-- ── Brand + tagline ── -->
       <div class="modal-logo">سَهرة <span class="accent">Sahra</span></div>
-      <div class="modal-sub" v-if="!wasInUrl">
-        Start a watch party. Share the link, load a video, and
-        watch together — perfectly in sync with everyone.
-      </div>
-      <div class="modal-sub" v-else>
-        You've been invited to watch together. Pick a name and
-        jump in — the party is already running!
-      </div>
+      <div class="modal-sub" v-if="!wasInUrl">{{ t('createSub') }}</div>
+      <div class="modal-sub" v-else>{{ t('joinSub') }}</div>
 
       <!-- ── JOIN MODE: prominent room ID card ── -->
       <div class="room-id-card" v-if="wasInUrl">
         <div>
-          <div class="room-id-card-label">Room ID</div>
-          <div class="room-id-card-value">{{ roomId }}</div>
+          <div class="room-id-card-label">{{ t('roomIdLabel') }}</div>
+          <div class="room-id-card-value ltr-always">{{ roomId }}</div>
         </div>
         <div class="room-id-card-icon">🍿</div>
       </div>
 
       <!-- ── CREATE MODE: small room hint ── -->
       <div class="modal-room-hint" v-else>
-        Your room will be: <span>{{ roomId }}</span>
+        {{ t('roomWillBe') }} <span class="ltr-always">{{ roomId }}</span>
       </div>
 
       <!-- ── Nickname input ── -->
-      <label>Your display name</label>
+      <label>{{ t('displayName') }}</label>
       <input
         v-model="nameInput"
         type="text"
-        :placeholder="wasInUrl ? 'e.g. MovieFan, NightOwl…' : 'e.g. CinemaHost, FilmBuff…'"
+        :placeholder="wasInUrl ? t('joinPlaceholder') : t('createPlaceholder')"
         maxlength="24"
         ref="nameInputRef"
         @keydown.enter="confirmName"
@@ -1198,7 +1306,7 @@
         @click="confirmName"
         :disabled="!nameInput.trim()"
       >
-        {{ wasInUrl ? '🎬  Join the Party →' : '✨  Create Party →' }}
+        {{ wasInUrl ? t('joinBtn') : t('createBtn') }}
       </button>
 
     </div>
@@ -1213,21 +1321,32 @@
     <div class="topbar">
       <div class="topbar-brand">سَهرة <span class="dot">·</span> Sahra</div>
       <div class="topbar-divider"></div>
-      <div class="topbar-title">{{ videoTitle || 'No media loaded' }}</div>
+      <div class="topbar-title">{{ videoTitle || t('noMedia') }}</div>
       <div class="topbar-right">
         <!-- Live connection badge -->
         <div class="status-badge">
           <div class="status-dot" :class="connStatus"></div>
           <span>{{
-            connStatus === 'connected'   ? 'Live'         :
-            connStatus === 'connecting'  ? 'Connecting…'  :
-                                          'Offline'
+            connStatus === 'connected'  ? t('statusLive')       :
+            connStatus === 'connecting' ? t('statusConnecting') :
+                                         t('statusOffline')
           }}</span>
         </div>
         <!-- Host / Viewer role -->
         <div class="role-chip" :class="isHost ? 'host' : 'viewer'">
-          {{ isHost ? '⚡ Host' : '👁 Viewer' }}
+          {{ isHost ? t('roleHost') : t('roleViewer') }}
         </div>
+        <!-- Language toggle -->
+        <button class="lang-btn" @click="toggleLang" :title="lang === 'en' ? 'Switch to Arabic' : 'التبديل للإنجليزية'">
+          {{ lang === 'en' ? '🇸🇦 العربية' : '🇬🇧 English' }}
+        </button>
+        <!-- CC active badge -->
+        <div
+          class="cc-badge"
+          v-if="activeCcLabel"
+          @click="clearSubtitles"
+          title="Click to remove subtitles"
+        >CC · {{ activeCcLabel }} ✕</div>
         <!-- Leave Party -->
         <button class="leave-btn" @click="showExitConfirm = true" title="Leave the watch party">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
@@ -1236,7 +1355,7 @@
             <polyline points="16 17 21 12 16 7"/>
             <line x1="21" y1="12" x2="9" y2="12"/>
           </svg>
-          Leave
+          {{ t('leaveBtn') }}
         </button>
       </div>
     </div>
@@ -1244,17 +1363,15 @@
     <!-- ── Video Player ── -->
     <div class="video-wrapper" ref="videoWrapper">
 
-      <!-- ① Native HTML5 <video> — for direct .mp4 / .webm / .mkv / HLS URLs -->
+      <!-- ① Video.js player — native .mp4 / .webm / HLS (.m3u8) + subtitle tracks -->
+      <!-- Video.js wraps this element and injects its own controls & CC button -->
       <video
+        id="vjs-player"
+        class="video-js vjs-default-skin"
         v-show="videoType === 'native' && videoSrc"
         ref="videoEl"
-        :src="videoSrc"
-        controls
         preload="metadata"
-        @play="onPlay"
-        @pause="onPause"
-        @seeked="onSeeked"
-        @error="onVideoError"
+        playsinline
       ></video>
 
       <!-- ② YouTube IFrame player mount point
@@ -1291,8 +1408,8 @@
             <polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none" opacity="0.6"/>
           </svg>
         </div>
-        <p>Paste a video URL or any streaming site link below to begin</p>
-        <div class="placeholder-hint">YouTube · .mp4 · .m3u8 · any streaming page</div>
+        <p>{{ t('placeholderText') }}</p>
+        <div class="placeholder-hint">{{ t('placeholderHint') }}</div>
       </div>
 
       <!-- Floating emoji layer — animations triggered by reactions -->
@@ -1310,7 +1427,7 @@
            Everyone sees the same countdown and presses play on GO! -->
       <div class="countdown-overlay" v-if="showCountdown">
         <div class="countdown-inner">
-          <div class="countdown-label">Get ready to press play</div>
+          <div class="countdown-label">{{ t('countdownLabel') }}</div>
           <div class="countdown-digit" v-if="countdownNum > 0" :key="countdownNum">
             {{ countdownNum }}
           </div>
@@ -1328,51 +1445,68 @@
 
       <!-- Row 1: Source URL input -->
       <div class="ctrl-row">
-        <span class="ctrl-label">Source</span>
+        <span class="ctrl-label">{{ t('srcLabel') }}</span>
         <input
-          class="field"
+          class="field ltr-always"
           v-model="urlInput"
           type="url"
-          placeholder="YouTube URL  ·  https://example.com/film.mp4  ·  .webm  ·  .m3u8"
+          :placeholder="t('srcPlaceholder')"
           @keydown.enter="loadVideo"
         />
-        <button class="btn btn-ghost" @click="loadVideo">Load</button>
+        <button class="btn btn-ghost" @click="loadVideo">{{ t('btnLoad') }}</button>
         <button
           class="btn"
           :class="showChannelPicker ? 'btn-primary' : 'btn-ghost'"
           @click="showChannelPicker = !showChannelPicker"
-          title="Browse live TV channels"
           style="gap:5px"
-        >📺 Live TV</button>
-        <!-- Sync button: always visible for Host once a video is loaded.
-             Label and behaviour change based on video type. -->
+        >{{ t('btnLiveTV') }}</button>
         <button
           v-if="isHost && (videoSrc || ytVideoId || iframeSrc)"
           class="btn btn-purple"
           @click="forceSyncPeers"
-          :title="videoType === 'iframe' ? 'Send 3-2-1 countdown to all viewers' : 'Broadcast current timestamp to all peers'"
-        >{{ videoType === 'iframe' ? '3-2-1 Sync' : 'Sync All' }}</button>
+        >{{ videoType === 'iframe' ? t('btnSync321') : t('btnSyncAll') }}</button>
       </div>
 
-      <!-- Row 1b: Sync Point (iframe mode only — Host announces timestamp in chat) -->
-      <!-- Since we can't read the iframe's current time, the Host types it manually.
-           This broadcasts the timestamp to chat so everyone seeks to the same point,
-           then Host fires 3-2-1 Sync to make everyone press play together. -->
+      <!-- Row 1b: Sync Point (iframe mode only) -->
       <div class="ctrl-row" v-if="isHost && videoType === 'iframe'">
-        <span class="ctrl-label">Sync Point</span>
+        <span class="ctrl-label">{{ t('syncPointLabel') }}</span>
         <input
-          class="field"
+          class="field ltr-always"
           v-model="syncTimeInput"
-          placeholder="Type your current timestamp, e.g.  1:18:05  — then Announce"
+          :placeholder="t('syncPointPlaceholder')"
           @keydown.enter="broadcastSyncPoint"
           style="font-family: var(--font-mono)"
         />
         <button class="btn btn-ghost" @click="broadcastSyncPoint" :disabled="!syncTimeInput.trim()">
-          📢 Announce
+          {{ t('btnAnnounce') }}
         </button>
       </div>
 
-      <!-- Row 1c: Server switcher — shown when a live TV channel is active -->
+      <!-- Row 1c: Subtitle loader — shown when native video is playing -->
+      <div class="ctrl-row" v-if="videoType === 'native' && videoSrc">
+        <span class="ctrl-label">{{ t('subtitleLabel') }}</span>
+        <select class="field" style="max-width:72px;flex:0;font-family:inherit" v-model="subtitleLang">
+          <option value="en">🇬🇧 EN</option>
+          <option value="ar">🇸🇦 AR</option>
+          <option value="fr">🇫🇷 FR</option>
+          <option value="de">🇩🇪 DE</option>
+          <option value="es">🇪🇸 ES</option>
+          <option value="tr">🇹🇷 TR</option>
+        </select>
+        <input
+          class="field ltr-always"
+          v-model="subtitleUrl"
+          type="url"
+          :placeholder="t('subtitlePlaceholder')"
+          @keydown.enter="addSubtitleTrack"
+        />
+        <button class="btn btn-purple" @click="addSubtitleTrack" :disabled="!subtitleUrl.trim()">
+          {{ t('btnAddCC') }}
+        </button>
+        <button class="btn btn-ghost" @click="clearSubtitles" v-if="activeCcLabel">✕</button>
+      </div>
+
+      <!-- Row 1d: Server switcher — shown when a live TV channel is active -->
       <div class="ctrl-row" v-if="activeChannel">
         <span class="ctrl-label">{{ activeChannel }}</span>
         <div class="server-strip">
@@ -1385,29 +1519,25 @@
             :title="srv"
           >S{{ i + 1 }}</button>
         </div>
-        <span class="server-hint" v-if="serverRetrying">Switching…</span>
-        <button class="btn btn-ghost" style="font-size:10px;padding:6px 10px" @click="tryNextServer" title="Try next server">
-          Next Server →
+        <span class="server-hint" v-if="serverRetrying">{{ t('serverSwitching') }}</span>
+        <button class="btn btn-ghost" style="font-size:10px;padding:6px 10px" @click="tryNextServer">
+          {{ t('btnNextServer') }}
         </button>
       </div>
 
       <!-- Row 2: Room share link -->
       <div class="ctrl-row">
-        <span class="ctrl-label">Room Link</span>
-        <div class="room-link-val" :title="fullRoomUrl">{{ fullRoomUrl }}</div>
+        <span class="ctrl-label">{{ t('roomLinkLabel') }}</span>
+        <div class="room-link-val ltr-always" :title="fullRoomUrl">{{ fullRoomUrl }}</div>
         <button class="btn btn-ghost" @click="copyLink">
-          {{ linkCopied ? '✓ Copied' : 'Copy' }}
+          {{ linkCopied ? t('btnCopied') : t('btnCopy') }}
         </button>
-        <!-- Claim host if not already host -->
         <button
           v-if="!isHost"
           class="btn btn-ghost"
           style="color: var(--accent-red); border-color: rgba(229,9,20,0.3)"
           @click="claimHost"
-          title="Take over host controls"
-        >
-          Claim Host
-        </button>
+        >{{ t('btnClaimHost') }}</button>
       </div>
 
     </div><!-- .control-bar -->
@@ -1417,7 +1547,7 @@
       <div class="tv-panel-header">
         <div class="tv-panel-title">
           <div class="tv-live-dot"></div>
-          Live TV Channels
+          {{ t('liveTVTitle') }}
         </div>
         <button class="tv-close-btn" @click="showChannelPicker = false">✕</button>
       </div>
@@ -1447,7 +1577,7 @@
     <!-- ── Participants Block ── -->
     <div class="participants-block">
       <div class="block-header">
-        <span class="block-title">Participants</span>
+        <span class="block-title">{{ t('participants') }}</span>
         <span class="count-badge">{{ onlineUsers.length }}</span>
       </div>
       <div class="participants-list">
@@ -1467,13 +1597,13 @@
               <span class="p-name-tag" v-if="user.isHost">HOST</span>
               <span class="p-name-you" v-if="user.username === nickname">(you)</span>
             </div>
-            <div class="p-role">{{ user.isHost ? 'Hosting' : 'Watching' }}</div>
+            <div class="p-role">{{ user.isHost ? t('hosting') : t('watching') }}</div>
           </div>
           <div class="online-dot"></div>
         </div>
 
         <div class="empty-list" v-if="onlineUsers.length === 0">
-          Connecting to room…
+          {{ t('connectingRoom') }}
         </div>
       </div>
     </div>
@@ -1482,7 +1612,7 @@
     <div class="chat-block">
 
       <div class="block-header" style="border-bottom:1px solid var(--border)">
-        <span class="block-title">Live Chat</span>
+        <span class="block-title">{{ t('liveChat') }}</span>
       </div>
 
       <!-- Scrollable messages -->
@@ -1508,7 +1638,7 @@
               >{{ m.author }}</span>
               <span class="msg-ts">{{ m.time }}</span>
             </div>
-            <div class="msg-body">{{ m.body }}</div>
+            <div class="msg-body" :dir="msgDir(m.body)">{{ m.body }}</div>
           </template>
         </div>
       </div>
@@ -1529,7 +1659,7 @@
         <input
           class="chat-field"
           v-model="chatDraft"
-          placeholder="Message the room…"
+          :placeholder="t('chatPlaceholder')"
           maxlength="300"
           @keydown.enter.prevent="sendMsg"
         />
@@ -1558,17 +1688,17 @@
   <div class="overlay" v-if="showExitConfirm" @click.self="showExitConfirm = false">
     <div class="confirm-modal">
       <span class="confirm-icon">👋</span>
-      <div class="confirm-title">Leave the Party?</div>
+      <div class="confirm-title">{{ t('leaveTitle') }}</div>
       <div class="confirm-sub">
-        You'll be disconnected from room <strong style="color:var(--text-primary);font-family:var(--font-mono)">{{ roomId }}</strong>.
+        You'll be disconnected from room <strong class="ltr-always" style="color:var(--text-primary);font-family:var(--font-mono)">{{ roomId }}</strong>.
         {{ isHost ? 'Leaving as Host means peers will lose sync control until someone claims it.' : 'Your chat messages will stay visible to others.' }}
       </div>
       <div class="confirm-actions">
         <button class="btn btn-ghost" @click="showExitConfirm = false">
-          Stay &amp; Watch
+          {{ t('stayBtn') }}
         </button>
         <button class="btn btn-primary" @click="leaveParty">
-          Leave Party
+          {{ t('leaveConfirmBtn') }}
         </button>
       </div>
     </div>
@@ -1582,17 +1712,17 @@
     <div class="left-screen-inner">
       <div class="left-screen-brand">سَهرة <span>·</span> Sahra</div>
       <span class="left-screen-emoji">🎬</span>
-      <div class="left-screen-title">You've left the party</div>
+      <div class="left-screen-title">{{ t('leftTitle') }}</div>
       <div class="left-screen-sub">
-        Hope you enjoyed the watch!<br>
+        {{ t('leftSub').split('\n')[0] }}<br>
         Start a fresh party or share your room link to invite friends again.
       </div>
       <div class="left-screen-actions">
         <button class="btn btn-primary" @click="startNewParty">
-          ✨ &nbsp;Start a New Party
+          {{ t('newPartyBtn') }}
         </button>
         <button class="btn btn-ghost" @click="rejoinParty">
-          ↩ &nbsp;Rejoin Room {{ roomId }}
+          {{ t('rejoinBtn') }} <span class="ltr-always">{{ roomId }}</span>
         </button>
       </div>
     </div>
@@ -1777,6 +1907,90 @@ const TV_CHANNELS = [
   },
 ];
 
+// ── ─────────────────────────────────────────────────────────────────
+//  TRANSLATIONS  (English / Arabic)
+// ── ─────────────────────────────────────────────────────────────────
+const STRINGS = {
+  en: {
+    // Modal
+    createParty:'Create Watch Party', joinParty:'Join Watch Party',
+    createSub:'Start a watch party. Share the link, load a video, and watch together — perfectly in sync with everyone.',
+    joinSub:"You've been invited to watch together. Pick a name and jump in — the party is already running!",
+    roomWillBe:'Your room will be:', roomIdLabel:'Room ID',
+    displayName:'Your display name',
+    createPlaceholder:'e.g. CinemaHost, FilmBuff…', joinPlaceholder:'e.g. MovieFan, NightOwl…',
+    createBtn:'✨  Create Party →', joinBtn:'🎬  Join the Party →',
+    // Topbar
+    noMedia:'No media loaded',
+    statusLive:'Live', statusConnecting:'Connecting…', statusOffline:'Offline',
+    roleHost:'⚡ Host', roleViewer:'👁 Viewer', leaveBtn:'Leave',
+    // Control bar
+    srcLabel:'Source', srcPlaceholder:'YouTube URL · https://example.com/film.mp4 · .webm · .m3u8',
+    btnLoad:'Load', btnLiveTV:'📺 Live TV', btnSyncAll:'Sync All', btnSync321:'3-2-1 Sync',
+    syncPointLabel:'Sync Point', syncPointPlaceholder:'Type your current timestamp, e.g.  1:18:05  — then Announce',
+    btnAnnounce:'📢 Announce',
+    subtitleLabel:'Subtitles', subtitlePlaceholder:'Subtitle URL (.vtt) — paste link and press Enter',
+    btnAddCC:'+ CC',
+    roomLinkLabel:'Room Link', btnCopy:'Copy', btnCopied:'✓ Copied', btnClaimHost:'Claim Host',
+    btnNextServer:'Next Server →', serverSwitching:'Switching…',
+    // Sidebar
+    participants:'Participants', liveChat:'Live Chat',
+    chatPlaceholder:'Message the room…', connectingRoom:'Connecting to room…',
+    hosting:'Hosting', watching:'Watching',
+    // Video
+    placeholderText:'Paste a video URL or any streaming site link below to begin',
+    placeholderHint:'YouTube · .mp4 · .m3u8 · any streaming page',
+    countdownLabel:'Get ready to press play',
+    // Live TV panel
+    liveTVTitle:'Live TV Channels',
+    // Exit confirm
+    leaveTitle:'Leave the Party?', stayBtn:'Stay & Watch', leaveConfirmBtn:'Leave Party',
+    // Left screen
+    leftTitle:"You've left the party",
+    leftSub:'Hope you enjoyed the watch!\nStart a fresh party or share your room link to invite friends again.',
+    newPartyBtn:'✨  Start a New Party', rejoinBtn:'↩  Rejoin Room',
+  },
+  ar: {
+    // Modal
+    createParty:'إنشاء حفلة مشاهدة', joinParty:'الانضمام إلى حفلة المشاهدة',
+    createSub:'ابدأ حفلة مشاهدة. شارك الرابط، وتابع الفيديو معًا بشكل متزامن مع الجميع.',
+    joinSub:'لقد تمت دعوتك للمشاهدة. اختر اسمًا وانضم — الحفلة جارية بالفعل!',
+    roomWillBe:'غرفتك ستكون:', roomIdLabel:'رقم الغرفة',
+    displayName:'اسم العرض',
+    createPlaceholder:'مثال: سينما هوست، فيلم باف…', joinPlaceholder:'مثال: محب الأفلام، بومة الليل…',
+    createBtn:'✨  إنشاء الحفلة ←', joinBtn:'🎬  الانضمام للحفلة ←',
+    // Topbar
+    noMedia:'لم يتم تحميل أي وسائط',
+    statusLive:'مباشر', statusConnecting:'جاري الاتصال…', statusOffline:'غير متصل',
+    roleHost:'⚡ مضيف', roleViewer:'👁 مشاهد', leaveBtn:'مغادرة',
+    // Control bar
+    srcLabel:'المصدر', srcPlaceholder:'رابط يوتيوب · https://example.com/film.mp4 · .m3u8',
+    btnLoad:'تحميل', btnLiveTV:'📺 بث مباشر', btnSyncAll:'مزامنة الكل', btnSync321:'عد تنازلي',
+    syncPointLabel:'نقطة المزامنة', syncPointPlaceholder:'اكتب الوقت الحالي مثل  1:18:05  — ثم اضغط إعلان',
+    btnAnnounce:'📢 إعلان',
+    subtitleLabel:'ترجمة', subtitlePlaceholder:'رابط ملف الترجمة (.vtt) — الصق واضغط Enter',
+    btnAddCC:'+ ترجمة',
+    roomLinkLabel:'رابط الغرفة', btnCopy:'نسخ', btnCopied:'✓ تم النسخ', btnClaimHost:'أخذ الإدارة',
+    btnNextServer:'الخادم التالي ←', serverSwitching:'جاري التبديل…',
+    // Sidebar
+    participants:'المشاركون', liveChat:'الدردشة المباشرة',
+    chatPlaceholder:'اكتب رسالة…', connectingRoom:'جاري الاتصال بالغرفة…',
+    hosting:'يستضيف', watching:'يشاهد',
+    // Video
+    placeholderText:'الصق رابط الفيديو أو أي رابط بث أسفله للبدء',
+    placeholderHint:'يوتيوب · mp4. · m3u8. · أي صفحة بث',
+    countdownLabel:'استعد للضغط على تشغيل',
+    // Live TV panel
+    liveTVTitle:'قنوات البث المباشر',
+    // Exit confirm
+    leaveTitle:'مغادرة الحفلة؟', stayBtn:'البقاء والمشاهدة', leaveConfirmBtn:'مغادرة الحفلة',
+    // Left screen
+    leftTitle:'لقد غادرت الحفلة',
+    leftSub:'نأمل أنك استمتعت بالمشاهدة!\nابدأ حفلة جديدة أو شارك رابط الغرفة لدعوة أصدقائك مجددًا.',
+    newPartyBtn:'✨  بدء حفلة جديدة', rejoinBtn:'↩  إعادة الانضمام',
+  },
+};
+
 const AVATAR_PALETTE = [
   '#7c3aed','#e50914','#0ea5e9','#f59e0b','#10b981',
   '#ec4899','#6366f1','#14b8a6','#f97316','#d946ef',
@@ -1786,6 +2000,38 @@ const AVATAR_PALETTE = [
 //  UTILITIES
 // ── ─────────────────────────────────────────────────────────────────
 const isDemoMode = () => SUPABASE_URL.includes('YOUR_PROJECT');
+
+/**
+ * Ping the Supabase REST health endpoint to confirm the project is
+ * awake and responding — not just accepting WebSocket handshakes.
+ * A paused project returns a non-2xx status.
+ */
+async function pingSupabase() {
+  if (isDemoMode()) return true;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/`, {
+      headers: { apikey: SUPABASE_ANON_KEY },
+      signal: AbortSignal.timeout(6000),
+    });
+    return res.ok || res.status === 404; // 404 = no tables yet but project is alive
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fire a lightweight ping every 3 days to keep the free-tier project
+ * from being auto-paused after 7 days of inactivity.
+ */
+function scheduleKeepAlive() {
+  const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+  const ping = () => {
+    pingSupabase().then(ok => {
+      if (!ok) console.warn('[Sahra] Keep-alive ping failed — project may be pausing.');
+    });
+  };
+  setInterval(ping, THREE_DAYS_MS);
+}
 
 function makeRoomId() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -1868,6 +2114,28 @@ createApp({
   setup() {
 
     // ────────────────────────────────────────────────────────
+    //  LANGUAGE / i18n
+    // ────────────────────────────────────────────────────────
+    const lang  = ref(localStorage.getItem('sahra_lang') || 'en');
+    const isRTL = computed(() => lang.value === 'ar');
+
+    // t(key) — reactive translation helper
+    // Reads lang.value so Vue re-renders the template on language change
+    function t(key) {
+      return STRINGS[lang.value]?.[key] ?? STRINGS.en[key] ?? key;
+    }
+
+    function toggleLang() {
+      lang.value = lang.value === 'en' ? 'ar' : 'en';
+      localStorage.setItem('sahra_lang', lang.value);
+    }
+
+    // Auto-detect Arabic text for per-message RTL direction
+    function msgDir(text) {
+      return /[؀-ۿ]/.test(text) ? 'rtl' : 'ltr';
+    }
+
+    // ────────────────────────────────────────────────────────
     //  ROOM & IDENTITY STATE
     // ────────────────────────────────────────────────────────
     const roomId   = ref('');
@@ -1916,6 +2184,13 @@ createApp({
     const syncTimeInput = ref('');
 
     // ────────────────────────────────────────────────────────
+    //  SUBTITLES (Video.js text tracks)
+    // ────────────────────────────────────────────────────────
+    const subtitleUrl  = ref('');
+    const subtitleLang = ref('en');
+    const activeCcLabel = ref(''); // e.g. "EN", "AR" — empty when no CC loaded
+
+    // ────────────────────────────────────────────────────────
     //  LIVE TV
     // ────────────────────────────────────────────────────────
     const showChannelPicker  = ref(false);
@@ -1929,6 +2204,10 @@ createApp({
       ? '🎬 <strong>Host:</strong> Seek to your start point → type the timestamp in <strong>Sync Point</strong> → press <strong>Announce</strong> → then <strong>3-2-1 Sync</strong>'
       : '🎬 <strong>Viewer:</strong> Seek to the timestamp announced in chat, then wait for the <strong>3-2-1 countdown</strong> — press play on GO!'
     );
+
+    // Video.js player instance (not reactive — plain JS object)
+    // Handles: HLS streams, MP4, WebM, subtitle / CC tracks
+    let vjsPlayer = null;
 
     // YouTube IFrame Player instance (not reactive — plain JS object)
     let ytPlayer = null;
@@ -2074,7 +2353,13 @@ createApp({
 
       channel.on('presence', { event: 'join' }, ({ key, newPresences }) => {
         const who = newPresences[0]?.username ?? key;
-        if (who !== nickname.value) sysMsg(`${who} joined the room`);
+        if (who !== nickname.value) {
+          sysMsg(`${who} joined the room`);
+          // Auto-push the current video state to the new joiner.
+          // Delay 1.8 s so their Supabase broadcast subscription is
+          // fully established before we send.
+          if (isHost.value) setTimeout(broadcastCurrentState, 1800);
+        }
       });
 
       channel.on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
@@ -2084,7 +2369,23 @@ createApp({
 
       // ── Broadcast: playback_control ──────────────────────
       channel.on('broadcast', { event: 'playback_control' }, ({ payload }) => {
+        // If we have no video loaded yet, ask host to resend the full state
+        // instead of applying a timestamp to nothing.
+        const hasVideo = videoSrc.value || ytVideoId.value || iframeSrc.value;
+        if (!hasVideo) {
+          emit('request_state', { from: nickname.value });
+          return;
+        }
         applyRemote(payload);
+      });
+
+      // ── Broadcast: request_state ──────────────────────────
+      // A peer is asking the host to re-broadcast the current state
+      // (happens when they receive a playback_control but have no video yet)
+      channel.on('broadcast', { event: 'request_state' }, ({ payload }) => {
+        if (!isHost.value) return;
+        sysMsg(`↩ Re-syncing state to ${payload?.from ?? 'peer'}…`);
+        setTimeout(broadcastCurrentState, 400);
       });
 
       // ── Broadcast: chat_message ──────────────────────────
@@ -2136,7 +2437,17 @@ createApp({
       // ── Subscribe then begin presence tracking ───────────
       await channel.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
+          // Verify the project is truly reachable (not just WebSocket handshake)
+          // by pinging the REST health endpoint before marking as connected.
+          const alive = await pingSupabase();
+          if (!alive) {
+            connStatus.value = 'disconnected';
+            sysMsg('⚠ Supabase project is paused — go to supabase.com/dashboard and click "Restore project", then reload.');
+            return;
+          }
           connStatus.value = 'connected';
+          // Schedule a keep-alive ping every 3 days to prevent auto-pausing
+          scheduleKeepAlive();
           await channel.track({
             username: nickname.value,
             isHost:   isHost.value,
@@ -2231,31 +2542,53 @@ createApp({
       syncTimeInput.value = '';
     }
 
-    /** Force-sync all peers. Behaviour depends on the active video type. */
+    /**
+     * Broadcast the full current playback state (source URL + position + play/pause)
+     * to every peer in the room. Called automatically when a peer joins, and
+     * manually via the "Sync All" / "3-2-1 Sync" buttons.
+     */
+    function broadcastCurrentState() {
+      if (!isHost.value) return;
+
+      if (videoType.value === 'youtube' && ytVideoId.value) {
+        // ── YouTube ──────────────────────────────────────────
+        emit('video_source', { type: 'youtube', id: ytVideoId.value });
+        if (ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
+          const state  = ytPlayer.getPlayerState();
+          const action = state === YT.PlayerState.PLAYING ? 'play' : 'pause';
+          emit('playback_control', { action, ts: ytPlayer.getCurrentTime() });
+        }
+
+      } else if (videoType.value === 'native' && videoSrc.value) {
+        // ── Video.js / native ────────────────────────────────
+        emit('video_source', { type: 'native', url: videoSrc.value });
+        if (vjsPlayer) {
+          emit('playback_control', {
+            action: vjsPlayer.paused() ? 'pause' : 'play',
+            ts:     vjsPlayer.currentTime(),
+          });
+        }
+
+      } else if (videoType.value === 'iframe' && iframeSrc.value) {
+        // ── Iframe ───────────────────────────────────────────
+        emit('video_source', { type: 'iframe', url: iframeSrc.value });
+      }
+    }
+
+    /** Manual sync button. Also re-sends the source so late-joiners get the video. */
     function forceSyncPeers() {
       if (!isHost.value) return;
 
       if (videoType.value === 'iframe') {
-        // ── Iframe mode: broadcast countdown then everyone presses play ──
+        // Iframe: re-send source + fire the 3-2-1 countdown
+        broadcastCurrentState();
         emit('iframe_countdown', {});
-        startCountdown(); // host sees it too
+        startCountdown();
         toast('3-2-1 countdown sent — press play when you see GO!');
-
-      } else if (videoType.value === 'youtube' && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
-        // ── YouTube mode: broadcast current timestamp ──
-        const state  = ytPlayer.getPlayerState();
-        const action = state === YT.PlayerState.PLAYING ? 'play' : 'pause';
-        emit('playback_control', { action, ts: ytPlayer.getCurrentTime() });
-        if (ytVideoId.value) emit('video_source', { type: 'youtube', id: ytVideoId.value });
-        toast('Sync broadcast sent to all viewers');
-
       } else {
-        // ── Native mode: broadcast current timestamp ──
-        const v = videoEl.value;
-        if (!v) return;
-        emit('playback_control', { action: v.paused ? 'pause' : 'play', ts: v.currentTime });
-        if (videoSrc.value) emit('video_source', { type: 'native', url: videoSrc.value });
-        toast('Sync broadcast sent to all viewers');
+        // YouTube / native: re-send source + playback position
+        broadcastCurrentState();
+        toast('Sync broadcast sent — source + timestamp pushed to all viewers');
       }
     }
 
@@ -2280,19 +2613,18 @@ createApp({
         }
 
       } else {
-        // ── Native <video> sync ───────────────────────────────
-        const v = videoEl.value;
-        if (!v) { remoteApply = false; return; }
-        const drift = Math.abs(v.currentTime - ts);
+        // ── Video.js sync ─────────────────────────────────────
+        if (!vjsPlayer) { remoteApply = false; return; }
+        const drift = Math.abs(vjsPlayer.currentTime() - ts);
 
         if (action === 'play') {
-          if (drift > DRIFT_THRESHOLD) v.currentTime = ts;
-          v.play().catch(() => {});
+          if (drift > DRIFT_THRESHOLD) vjsPlayer.currentTime(ts);
+          vjsPlayer.play().catch(() => {});
         } else if (action === 'pause') {
-          if (drift > DRIFT_THRESHOLD) v.currentTime = ts;
-          v.pause();
+          if (drift > DRIFT_THRESHOLD) vjsPlayer.currentTime(ts);
+          vjsPlayer.pause();
         } else if (action === 'seek') {
-          v.currentTime = ts;
+          vjsPlayer.currentTime(ts);
         }
       }
 
@@ -2307,11 +2639,108 @@ createApp({
     }
 
     // ════════════════════════════════════════════════════════
+    //  VIDEO.JS — player init + subtitle management
+    // ════════════════════════════════════════════════════════
+
+    /**
+     * Create (once) or reuse the Video.js player instance.
+     * Registers play / pause / seeked / error events through
+     * Video.js so they stay in sync with VHS (HLS) internals.
+     */
+    async function initVideoJsPlayer() {
+      if (vjsPlayer) return vjsPlayer;
+
+      await nextTick();
+      vjsPlayer = videojs('vjs-player', {
+        controls:      true,
+        preload:       'metadata',
+        fill:          true,          // fills .video-wrapper
+        playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2],
+        html5: {
+          vhs: {
+            overrideNative: !videojs.browser.IS_SAFARI,
+            enableLowInitialPlaylist: true,
+          },
+          nativeTextTracks: false,    // let Video.js render CC cues
+        },
+      });
+
+      // Mirror host events to peers
+      vjsPlayer.on('play', () => {
+        if (!isHost.value || remoteApply) return;
+        emit('playback_control', { action: 'play', ts: vjsPlayer.currentTime() });
+      });
+      vjsPlayer.on('pause', () => {
+        if (!isHost.value || remoteApply) return;
+        emit('playback_control', { action: 'pause', ts: vjsPlayer.currentTime() });
+      });
+      vjsPlayer.on('seeked', () => {
+        if (!isHost.value || remoteApply) return;
+        clearTimeout(seekTimer);
+        seekTimer = setTimeout(() => {
+          emit('playback_control', { action: 'seek', ts: vjsPlayer.currentTime() });
+        }, SEEK_DEBOUNCE_MS);
+      });
+      vjsPlayer.on('error', () => {
+        if (_currentTvChannelRef.value) tryNextServer();
+      });
+
+      return vjsPlayer;
+    }
+
+    // ── Subtitle helpers ──────────────────────────────────────
+
+    const LANG_LABELS = {
+      en: 'EN', ar: 'AR', fr: 'FR', de: 'DE', es: 'ES', tr: 'TR',
+    };
+
+    function addSubtitleTrack() {
+      const url = subtitleUrl.value.trim();
+      if (!vjsPlayer || !url) return;
+
+      // Remove any existing subtitle/caption tracks first
+      const existing = vjsPlayer.remoteTextTracks();
+      for (let i = existing.length - 1; i >= 0; i--) {
+        vjsPlayer.removeRemoteTextTrack(existing[i]);
+      }
+
+      const lang  = subtitleLang.value;
+      const label = LANG_LABELS[lang] ?? lang.toUpperCase();
+
+      vjsPlayer.addRemoteTextTrack({
+        kind:    'subtitles',
+        src:     url,
+        srclang: lang,
+        label,
+        default: true,
+      }, /* manualCleanup */ false);
+
+      activeCcLabel.value = label;
+      subtitleUrl.value   = '';
+      toast(`✅ Subtitles loaded (${label}) — CC button is in the player controls`);
+
+      // Sync to peers via chat notice
+      const body = `🗒 Subtitles loaded: ${label}  —  ${url}`;
+      pushMsg({ id: uid(), type: 'system', body });
+      emit('chat_message', { user: '⚡ Sync', text: body, ts: Date.now(), isHost: true });
+    }
+
+    function clearSubtitles() {
+      if (!vjsPlayer) return;
+      const tracks = vjsPlayer.remoteTextTracks();
+      for (let i = tracks.length - 1; i >= 0; i--) {
+        vjsPlayer.removeRemoteTextTrack(tracks[i]);
+      }
+      activeCcLabel.value = '';
+      toast('Subtitles removed');
+    }
+
+    // ════════════════════════════════════════════════════════
     //  VIDEO SOURCE — supports native URLs and YouTube
     // ════════════════════════════════════════════════════════
 
     /**
-     * Parse the URL input and load either the native <video> or
+     * Parse the URL input and load either the Video.js player or
      * the YouTube IFrame player based on what the URL points to.
      */
     async function loadVideo() {
@@ -2342,12 +2771,23 @@ createApp({
         }
 
       } else if (isDirectMediaUrl(u)) {
-        // ── Native direct URL mode ────────────────────────────
+        // ── Video.js native mode (.mp4 / .webm / .m3u8 / HLS) ─
         videoType.value  = 'native';
         ytVideoId.value  = '';
         iframeSrc.value  = '';
-        videoSrc.value   = u;
+        videoSrc.value   = u;   // keeps v-show reactive
         videoTitle.value = decodeURIComponent(u.split('/').pop().split('?')[0]) || u;
+
+        await nextTick(); // ensure #vjs-player is visible in DOM
+        const vjs = await initVideoJsPlayer();
+
+        // Determine MIME type for Video.js VHS (HLS adaptive streaming)
+        const mime = /\.m3u8/i.test(u) ? 'application/x-mpegURL'
+                   : /\.webm/i.test(u) ? 'video/webm'
+                   : /\.ogv?/i.test(u) ? 'video/ogg'
+                   : /\.mpd/i.test(u)  ? 'application/dash+xml'
+                   :                     'video/mp4';
+        vjs.src({ src: u, type: mime });
 
         if (isHost.value && !remoteSourceApply) {
           emit('video_source', { type: 'native', url: u });
@@ -2643,6 +3083,12 @@ createApp({
     //  TEMPLATE BINDINGS
     // ════════════════════════════════════════════════════════
     return {
+      // Language / i18n
+      lang, isRTL, t, toggleLang, msgDir,
+      // Subtitles (Video.js)
+      subtitleUrl, subtitleLang, activeCcLabel, addSubtitleTrack, clearSubtitles,
+      // Sync
+      broadcastCurrentState,
       // Live TV
       TV_CHANNELS, showChannelPicker, activeChannel, loadChannel,
       _currentTvChannelRef, activeServerIndex, serverRetrying, switchServer, tryNextServer,
