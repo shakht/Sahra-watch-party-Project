@@ -416,6 +416,60 @@
       to   { transform: scale(1);   opacity: 1; }
     }
 
+    /* ── "Click to Watch" Join Overlay ──
+       Shown to peers only — browser autoplay policy requires one user
+       gesture before programmatic play() is allowed. This one click
+       unlocks the player for the whole session. */
+    .watch-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.72);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 55;
+      cursor: pointer;
+      backdrop-filter: blur(2px);
+      transition: background 0.2s ease;
+    }
+    .watch-overlay:hover { background: rgba(0, 0, 0, 0.60); }
+    .watch-overlay-inner {
+      text-align: center;
+      user-select: none;
+      pointer-events: none;
+    }
+    .watch-overlay-icon {
+      width: 88px;
+      height: 88px;
+      border-radius: 50%;
+      background: var(--accent-red);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      margin: 0 auto 20px;
+      box-shadow: 0 0 0 0 rgba(229,9,20,0.5);
+      animation: watchPulse 2s ease-in-out infinite;
+      padding-left: 5px; /* optical centering of ▶ */
+    }
+    @keyframes watchPulse {
+      0%   { box-shadow: 0 0 0  0   rgba(229,9,20,0.55); }
+      60%  { box-shadow: 0 0 0 22px rgba(229,9,20,0.00); }
+      100% { box-shadow: 0 0 0  0   rgba(229,9,20,0.00); }
+    }
+    .watch-overlay-title {
+      font-size: 22px;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 8px;
+      letter-spacing: 0.02em;
+    }
+    .watch-overlay-sub {
+      font-size: 13px;
+      color: rgba(255,255,255,0.60);
+      font-weight: 500;
+    }
+
     /* ── Sync Flash Indicator ── */
     .sync-indicator {
       position: absolute;
@@ -1435,6 +1489,23 @@
         </div>
       </div>
 
+      <!-- ── "Click to Watch" Join Overlay ──
+           Browser autoplay policy blocks programmatic play() unless the user
+           has made a gesture first. This overlay acts as that required gesture.
+           Peers click once → autoplay unlocked → host controls take over.
+           Hidden for the host (they loaded the video themselves). -->
+      <div
+        class="watch-overlay"
+        v-if="!isHost && videoType === 'native' && videoSrc && !watchPartyReady"
+        @click="joinWatchParty"
+      >
+        <div class="watch-overlay-inner">
+          <div class="watch-overlay-icon">▶</div>
+          <div class="watch-overlay-title">{{ t('clickToWatch') }}</div>
+          <div class="watch-overlay-sub">{{ t('clickToWatchSub') }}</div>
+        </div>
+      </div>
+
       <!-- Sync pulse badge (flashes when peer receives host sync) -->
       <div class="sync-indicator" :class="{ visible: syncPulse }">⟳ Syncing</div>
 
@@ -1940,6 +2011,8 @@ const STRINGS = {
     // Video
     placeholderText:'Paste a video URL or any streaming site link below to begin',
     placeholderHint:'YouTube · .mp4 · .m3u8 · any streaming page',
+    clickToWatch:'Click to Watch',
+    clickToWatchSub:'You\'ll sync to the host automatically',
     countdownLabel:'Get ready to press play',
     // Live TV panel
     liveTVTitle:'Live TV Channels',
@@ -1979,6 +2052,8 @@ const STRINGS = {
     // Video
     placeholderText:'الصق رابط الفيديو أو أي رابط بث أسفله للبدء',
     placeholderHint:'يوتيوب · mp4. · m3u8. · أي صفحة بث',
+    clickToWatch:'انقر للمشاهدة',
+    clickToWatchSub:'ستتزامن مع المضيف تلقائياً',
     countdownLabel:'استعد للضغط على تشغيل',
     // Live TV panel
     liveTVTitle:'قنوات البث المباشر',
@@ -2165,7 +2240,11 @@ createApp({
     const videoSrc     = ref('');
     const urlInput     = ref('');
     const videoTitle   = ref('');
-    const syncPulse    = ref(false);
+    const syncPulse       = ref(false);
+    // Tracks whether this peer has clicked "Click to Watch".
+    // Browser autoplay policy requires a user gesture before play() succeeds.
+    // The overlay provides that gesture. Host is always ready (they loaded it).
+    const watchPartyReady = ref(false);
 
     // 'native' = direct file URL  |  'youtube' = YouTube IFrame API  |  'iframe' = embedded webpage
     const videoType      = ref('native');
@@ -2421,6 +2500,7 @@ createApp({
       channel.on('broadcast', { event: 'video_source' }, ({ payload }) => {
         if (isHost.value) return; // guard (self:false already prevents echo)
         remoteSourceApply = true;
+        watchPartyReady.value = false; // new video → show overlay again (browser needs fresh gesture)
 
         // Reconstruct the URL the peer should load
         urlInput.value =
@@ -2588,6 +2668,34 @@ createApp({
         broadcastCurrentState();
         toast('Sync broadcast sent — source + timestamp pushed to all viewers');
       }
+    }
+
+    /**
+     * Called when a peer clicks the "Click to Watch" overlay.
+     *
+     * Why this exists:
+     * Browsers block programmatic play() calls unless there has been a recent
+     * user gesture (a click, tap, etc.). The overlay provides exactly that
+     * gesture. Once the user clicks:
+     *   1. play() is called synchronously — this primes the browser.
+     *   2. We discard the stale queued command (timing will be off).
+     *   3. We ask the host for its CURRENT position so we sync perfectly.
+     *   4. The host's response calls applyRemote() → seek + play at correct ts.
+     *   5. All future host play/pause/seek events work without any overlay.
+     */
+    function joinWatchParty() {
+      watchPartyReady.value = true;
+      pendingRemoteCmd = null; // discard stale command; fresh one comes via request_state
+
+      if (vjsPlayer) {
+        // This play() call carries the user gesture — it primes browser autoplay
+        // for the rest of the session, even after seek / pause / re-play.
+        vjsPlayer.play().catch(() => {});
+      }
+
+      // Ask host for their current position; they'll reply with broadcastCurrentState()
+      // which sends video_source + playback_control with the live timestamp.
+      emit('request_state', { from: nickname.value });
     }
 
     // ── Apply a remote playback command received from the Host ──
@@ -3134,6 +3242,7 @@ createApp({
       videoType, ytVideoId, iframeSrc, showIframeNotice, iframeNoticeHtml,
       showCountdown, countdownNum,
       syncTimeInput, broadcastSyncPoint,
+      watchPartyReady, joinWatchParty,
       onPlay, onPause, onSeeked, loadVideo, forceSyncPeers,
       // Participants
       onlineUsers, colorOf,
