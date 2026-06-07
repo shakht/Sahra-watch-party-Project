@@ -1297,52 +1297,102 @@
   <div class="overlay" v-if="showModal">
     <div class="modal">
 
-      <!-- ── Mode pill: CREATE vs JOIN ── -->
-      <div class="modal-mode-pill" :class="wasInUrl ? 'join' : 'create'">
-        <span>{{ wasInUrl ? '🎬' : '✨' }}</span>
-        {{ wasInUrl ? t('joinParty') : t('createParty') }}
-      </div>
+      <!-- ══ LANDING: choose Create or Join ══ -->
+      <template v-if="modalMode === 'landing'">
+        <div class="modal-logo">سَهرة <span class="accent">Sahra</span></div>
+        <div class="modal-sub" style="margin-bottom:28px">{{ t('landingSub') }}</div>
+        <button
+          class="btn btn-primary"
+          style="width:100%;padding:13px;font-size:13px;margin-bottom:10px"
+          @click="chooseModeCreate"
+        >{{ t('createPartyBtn') }}</button>
+        <button
+          class="btn btn-purple"
+          style="width:100%;padding:13px;font-size:13px"
+          @click="chooseModeJoin"
+        >{{ t('joinWithCodeBtn') }}</button>
+      </template>
 
-      <!-- ── Brand + tagline ── -->
-      <div class="modal-logo">سَهرة <span class="accent">Sahra</span></div>
-      <div class="modal-sub" v-if="!wasInUrl">{{ t('createSub') }}</div>
-      <div class="modal-sub" v-else>{{ t('joinSub') }}</div>
+      <!-- ══ JOIN BY CODE: enter room code ══ -->
+      <template v-else-if="modalMode === 'joinCode'">
+        <div class="modal-mode-pill join"><span>🎬</span> {{ t('joinParty') }}</div>
+        <div class="modal-logo">سَهرة <span class="accent">Sahra</span></div>
+        <label>{{ t('roomCodeLabel') }}</label>
+        <input
+          v-model="joinCodeInput"
+          type="text"
+          :placeholder="t('roomCodePlaceholder')"
+          maxlength="10"
+          ref="joinCodeRef"
+          @keydown.enter="confirmJoinCode"
+          style="text-transform:uppercase;font-family:var(--font-mono);letter-spacing:0.12em;font-size:18px"
+        />
+        <button
+          class="btn btn-purple"
+          style="width:100%;padding:12px;font-size:13px;margin-bottom:8px"
+          @click="confirmJoinCode"
+          :disabled="joinCodeInput.trim().length < 4"
+        >{{ t('enterRoomBtn') }}</button>
+        <button
+          class="btn btn-ghost"
+          style="width:100%;padding:10px;font-size:12px"
+          @click="modalMode = 'landing'"
+        >{{ t('backBtn') }}</button>
+      </template>
 
-      <!-- ── JOIN MODE: prominent room ID card ── -->
-      <div class="room-id-card" v-if="wasInUrl">
-        <div>
-          <div class="room-id-card-label">{{ t('roomIdLabel') }}</div>
-          <div class="room-id-card-value ltr-always">{{ roomId }}</div>
+      <!-- ══ CREATE: enter nickname, then start ══ -->
+      <template v-else-if="modalMode === 'create'">
+        <div class="modal-mode-pill create"><span>✨</span> {{ t('createParty') }}</div>
+        <div class="modal-logo">سَهرة <span class="accent">Sahra</span></div>
+        <div class="modal-sub">{{ t('createSub') }}</div>
+        <div class="modal-room-hint">
+          {{ t('roomWillBe') }} <span class="ltr-always">{{ roomId }}</span>
         </div>
-        <div class="room-id-card-icon">🍿</div>
-      </div>
+        <label>{{ t('displayName') }}</label>
+        <input
+          v-model="nameInput"
+          type="text"
+          :placeholder="t('createPlaceholder')"
+          maxlength="24"
+          ref="nameInputRef"
+          @keydown.enter="confirmName"
+        />
+        <button
+          class="btn btn-primary"
+          style="width:100%;padding:12px;font-size:13px;letter-spacing:0.04em"
+          @click="confirmName"
+          :disabled="!nameInput.trim()"
+        >{{ t('createBtn') }}</button>
+      </template>
 
-      <!-- ── CREATE MODE: small room hint ── -->
-      <div class="modal-room-hint" v-else>
-        {{ t('roomWillBe') }} <span class="ltr-always">{{ roomId }}</span>
-      </div>
-
-      <!-- ── Nickname input ── -->
-      <label>{{ t('displayName') }}</label>
-      <input
-        v-model="nameInput"
-        type="text"
-        :placeholder="wasInUrl ? t('joinPlaceholder') : t('createPlaceholder')"
-        maxlength="24"
-        ref="nameInputRef"
-        @keydown.enter="confirmName"
-      />
-
-      <!-- ── CTA button: different label & colour per mode ── -->
-      <button
-        class="btn"
-        :class="wasInUrl ? 'btn-purple' : 'btn-primary'"
-        style="width:100%; padding:12px; font-size:13px; letter-spacing:0.04em"
-        @click="confirmName"
-        :disabled="!nameInput.trim()"
-      >
-        {{ wasInUrl ? t('joinBtn') : t('createBtn') }}
-      </button>
+      <!-- ══ JOIN: arrived via shared link, enter nickname ══ -->
+      <template v-else>
+        <div class="modal-mode-pill join"><span>🎬</span> {{ t('joinParty') }}</div>
+        <div class="modal-logo">سَهرة <span class="accent">Sahra</span></div>
+        <div class="modal-sub">{{ t('joinSub') }}</div>
+        <div class="room-id-card">
+          <div>
+            <div class="room-id-card-label">{{ t('roomIdLabel') }}</div>
+            <div class="room-id-card-value ltr-always">{{ roomId }}</div>
+          </div>
+          <div class="room-id-card-icon">🍿</div>
+        </div>
+        <label>{{ t('displayName') }}</label>
+        <input
+          v-model="nameInput"
+          type="text"
+          :placeholder="t('joinPlaceholder')"
+          maxlength="24"
+          ref="nameInputRef"
+          @keydown.enter="confirmName"
+        />
+        <button
+          class="btn btn-purple"
+          style="width:100%;padding:12px;font-size:13px;letter-spacing:0.04em"
+          @click="confirmName"
+          :disabled="!nameInput.trim()"
+        >{{ t('joinBtn') }}</button>
+      </template>
 
     </div>
   </div>
@@ -1998,6 +2048,11 @@ const STRINGS = {
     leftTitle:"You've left the party",
     leftSub:'Hope you enjoyed the watch!\nStart a fresh party or share your room link to invite friends again.',
     newPartyBtn:'✨  Start a New Party', rejoinBtn:'↩  Rejoin Room',
+    // Landing screen
+    landingSub:'Watch movies and shows together, perfectly in sync.',
+    createPartyBtn:'✨  Create a Party →', joinWithCodeBtn:'🎬  Join with Room Code',
+    roomCodeLabel:'Room Code', roomCodePlaceholder:'Enter room code  (e.g. GMRO7Y)',
+    enterRoomBtn:'Enter Room →', backBtn:'← Back',
   },
   ar: {
     // Modal
@@ -2038,6 +2093,11 @@ const STRINGS = {
     leftTitle:'لقد غادرت الحفلة',
     leftSub:'نأمل أنك استمتعت بالمشاهدة!\nابدأ حفلة جديدة أو شارك رابط الغرفة لدعوة أصدقائك مجددًا.',
     newPartyBtn:'✨  بدء حفلة جديدة', rejoinBtn:'↩  إعادة الانضمام',
+    // Landing screen
+    landingSub:'شاهد الأفلام والمسلسلات معاً بتزامن تام.',
+    createPartyBtn:'✨  إنشاء حفلة ←', joinWithCodeBtn:'🎬  الانضمام برمز الغرفة',
+    roomCodeLabel:'رمز الغرفة', roomCodePlaceholder:'أدخل رمز الغرفة  (مثال: GMRO7Y)',
+    enterRoomBtn:'← دخول الغرفة', backBtn:'رجوع →',
   },
 };
 
@@ -2193,6 +2253,9 @@ createApp({
     const showModal    = ref(false);
     const nameInput    = ref('');
     const nameInputRef = ref(null);
+    const modalMode     = ref('landing'); // 'landing' | 'create' | 'joinCode' | 'join'
+    const joinCodeInput = ref('');
+    const joinCodeRef   = ref(null);
 
     // true  → user arrived via a shared ?room= link (JOIN mode)
     // false → room was auto-generated, this person is the creator
@@ -2317,30 +2380,56 @@ createApp({
     //  BOOTSTRAP — runs on mount
     // ════════════════════════════════════════════════════════
     onMounted(async () => {
-      // 1. Resolve or generate room ID
-      //    wasInUrl = true means a friend shared this link → JOIN mode
-      let rid = roomFromUrl();
+      const rid = roomFromUrl();
       if (rid) {
-        wasInUrl.value = true;          // arriving via shared link → JOIN
+        // Arriving via shared link → go straight to JOIN
+        wasInUrl.value = true;
+        roomId.value   = rid;
+        const saved = localStorage.getItem('sahra_nick');
+        if (saved) {
+          nickname.value = saved;
+          await boot();
+        } else {
+          modalMode.value = 'join';
+          showModal.value = true;
+          await nextTick();
+          nameInputRef.value?.focus();
+        }
       } else {
-        rid = makeRoomId();             // brand-new session → CREATE
-        pushRoomToUrl(rid);
-      }
-      roomId.value = rid;
-
-      // 2. Check for saved nickname
-      const saved = localStorage.getItem('sahra_nick');
-      if (saved) {
-        nickname.value = saved;
-        await boot();
-      } else {
+        // No room in URL → show landing so user can choose Create or Join
+        modalMode.value = 'landing';
         showModal.value = true;
-        await nextTick();
-        nameInputRef.value?.focus();
       }
     });
 
     onUnmounted(teardown);
+
+    // ── Landing → Create: generate a fresh room and switch to create mode
+    function chooseModeCreate() {
+      const rid      = makeRoomId();
+      roomId.value   = rid;
+      wasInUrl.value = false;
+      pushRoomToUrl(rid);
+      nameInput.value = localStorage.getItem('sahra_nick') || '';
+      modalMode.value = 'create';
+      nextTick(() => nameInputRef.value?.focus());
+    }
+
+    // ── Landing → Join: show the room-code input
+    function chooseModeJoin() {
+      joinCodeInput.value = '';
+      modalMode.value     = 'joinCode';
+      nextTick(() => joinCodeRef.value?.focus());
+    }
+
+    // ── Join by code: navigate to ?room=CODE (full reload triggers join flow)
+    function confirmJoinCode() {
+      const code = joinCodeInput.value.trim().toUpperCase();
+      if (code.length < 4) return;
+      const u = new URL(window.location.href);
+      u.searchParams.set('room', code);
+      window.location.href = u.toString();
+    }
 
     // ── Confirm nickname from modal
     async function confirmName() {
@@ -3267,8 +3356,10 @@ createApp({
       _currentTvChannelRef, activeServerIndex, serverRetrying, switchServer, tryNextServer,
       // Room & identity
       roomId, nickname, isHost, fullRoomUrl, EMOJIS,
-      // Modal (create vs join)
+      // Modal (landing / create / joinCode / join)
       showModal, wasInUrl, nameInput, nameInputRef, confirmName,
+      modalMode, joinCodeInput, joinCodeRef,
+      chooseModeCreate, chooseModeJoin, confirmJoinCode,
       // Connection
       connStatus,
       // Video — native, YouTube, and iframe embed
