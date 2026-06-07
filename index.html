@@ -1552,6 +1552,19 @@
           @keydown.enter="loadVideo"
         />
         <button class="btn btn-ghost" @click="loadVideo">{{ t('btnLoad') }}</button>
+        <!-- Hidden file picker for local video files -->
+        <input
+          type="file"
+          accept="video/*,.mkv,.avi,.wmv,.ts"
+          style="display:none"
+          ref="localFileRef"
+          @change="handleLocalFile"
+        />
+        <button
+          class="btn btn-ghost"
+          @click="localFileRef.click()"
+          title="Play a local video file from your PC"
+        >📁 Local</button>
         <button
           class="btn"
           :class="showChannelPicker ? 'btn-primary' : 'btn-ghost'"
@@ -1594,10 +1607,23 @@
         <input
           class="field ltr-always"
           v-model="subtitleUrl"
-          type="url"
+          type="text"
           :placeholder="t('subtitlePlaceholder')"
           @keydown.enter="addSubtitleTrack"
         />
+        <!-- Hidden file picker: .vtt or .srt from local disk -->
+        <input
+          type="file"
+          accept=".vtt,.srt"
+          style="display:none"
+          ref="subtitleFileRef"
+          @change="handleSubtitleFile"
+        />
+        <button
+          class="btn btn-ghost"
+          @click="subtitleFileRef.click()"
+          title="Load subtitle from file (.vtt or .srt)"
+        >📁</button>
         <button class="btn btn-purple" @click="addSubtitleTrack" :disabled="!subtitleUrl.trim()">
           {{ t('btnAddCC') }}
         </button>
@@ -2277,6 +2303,7 @@ createApp({
     const videoWrapper = ref(null);
     const videoSrc     = ref('');
     const urlInput     = ref('');
+    const localFileRef = ref(null); // ref to the hidden local-video file input
     const videoTitle   = ref('');
     const syncPulse   = ref(false);
     // True while the peer is in muted-autoplay state.
@@ -2302,9 +2329,10 @@ createApp({
     // ────────────────────────────────────────────────────────
     //  SUBTITLES (Video.js text tracks)
     // ────────────────────────────────────────────────────────
-    const subtitleUrl  = ref('');
-    const subtitleLang = ref('en');
-    const activeCcLabel = ref(''); // e.g. "EN", "AR" — empty when no CC loaded
+    const subtitleUrl     = ref('');
+    const subtitleLang    = ref('en');
+    const activeCcLabel   = ref(''); // e.g. "EN", "AR" — empty when no CC loaded
+    const subtitleFileRef = ref(null); // ref to the hidden <input type="file">
 
     // ────────────────────────────────────────────────────────
     //  LIVE TV
@@ -2966,6 +2994,64 @@ createApp({
       toast('Subtitles removed');
     }
 
+    /**
+     * Load a subtitle file from the user's local disk.
+     * Accepts .vtt (used as-is) and .srt (auto-converted to WebVTT).
+     * Creates a temporary blob URL and feeds it into addSubtitleTrack().
+     */
+    /**
+     * Load a local video file from the user's PC.
+     * Creates a blob URL (local to this browser) and feeds it into loadVideo().
+     * Blob URLs cannot be shared with peers — both sides must load the same
+     * file themselves. Host play/pause/seek sync still works normally.
+     */
+    async function handleLocalFile(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      event.target.value = '';
+
+      urlInput.value = URL.createObjectURL(file);
+      await loadVideo();
+      videoTitle.value = file.name; // override the garbage blob-URL title
+
+      if (isHost.value) {
+        const notice = `📁 Host loaded a local file: "${file.name}" — load the same file with the 📁 button to watch in sync`;
+        pushMsg({ id: uid(), type: 'system', body: notice });
+        emit('chat_message', { user: '⚡ Room', text: notice, ts: Date.now(), isHost: true });
+      } else {
+        sysMsg(`📁 Local file loaded: "${file.name}" — waiting for host sync`);
+      }
+    }
+
+    function handleSubtitleFile(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      event.target.value = ''; // reset so the same file can be re-selected
+
+      const done = (blobUrl) => {
+        subtitleUrl.value = blobUrl;
+        addSubtitleTrack(); // Video.js built-in: addRemoteTextTrack() via blob URL
+        toast(`📁 ${file.name}`);
+      };
+
+      if (!file.name.toLowerCase().endsWith('.srt')) {
+        // VTT (or anything else): hand a blob URL straight to Video.js
+        done(URL.createObjectURL(file));
+        return;
+      }
+
+      // SRT: Video.js only parses WebVTT, so convert first (comma→dot in timestamps)
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const vtt  = 'WEBVTT\n\n' +
+          e.target.result
+            .replace(/\r\n/g, '\n')
+            .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+        done(URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' })));
+      };
+      reader.readAsText(file, 'UTF-8');
+    }
+
     // ════════════════════════════════════════════════════════
     //  VIDEO SOURCE — supports native URLs and YouTube
     // ════════════════════════════════════════════════════════
@@ -3020,7 +3106,8 @@ createApp({
                    :                     'video/mp4';
         vjs.src({ src: u, type: mime });
 
-        if (isHost.value && !remoteSourceApply) {
+        // Blob URLs are local to this browser — don't broadcast them to peers
+        if (isHost.value && !remoteSourceApply && !u.startsWith('blob:')) {
           emit('video_source', { type: 'native', url: u });
         }
 
@@ -3349,6 +3436,8 @@ createApp({
       lang, isRTL, t, toggleLang, msgDir,
       // Subtitles (Video.js)
       subtitleUrl, subtitleLang, activeCcLabel, addSubtitleTrack, clearSubtitles,
+      subtitleFileRef, handleSubtitleFile,
+      localFileRef, handleLocalFile,
       // Sync
       broadcastCurrentState,
       // Live TV
