@@ -2354,12 +2354,16 @@ createApp({
 
     // ── Full app boot after we have a nickname
     async function boot() {
-      // First visitor to this session claims host
       const hk = `sahra_host_${roomId.value}`;
-      if (!sessionStorage.getItem(hk)) {
+      if (!wasInUrl.value && !sessionStorage.getItem(hk)) {
+        // Room creator on first load: auto-become host
         isHost.value = true;
         sessionStorage.setItem(hk, '1');
+      } else if (sessionStorage.getItem(hk)) {
+        // Same-tab refresh for anyone who held host in this tab: restore
+        isHost.value = true;
       }
+      // Joiners arriving via a shared link start as viewers
 
       sysMsg(`You joined room ${roomId.value} as ${isHost.value ? 'Host ⚡' : 'Viewer 👁'}`);
 
@@ -3166,6 +3170,13 @@ createApp({
      */
     async function leaveParty() {
       showExitConfirm.value = false;
+
+      // Stop all media so audio doesn't keep playing under the left-party screen
+      if (vjsPlayer) { vjsPlayer.pause(); vjsPlayer.src(''); }
+      if (ytPlayer && typeof ytPlayer.stopVideo === 'function') ytPlayer.stopVideo();
+      videoSrc.value  = '';
+      ytVideoId.value = '';
+      iframeSrc.value = '';
 
       // Announce departure in chat before disconnecting
       emit('chat_message', {
