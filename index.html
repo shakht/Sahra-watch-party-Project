@@ -2208,6 +2208,10 @@ createApp({
     // Handles: HLS streams, MP4, WebM, subtitle / CC tracks
     let vjsPlayer = null;
 
+    // If a playback_control broadcast arrives before vjsPlayer is ready,
+    // store it here and apply it as soon as the player finishes initialising.
+    let pendingRemoteCmd = null;
+
     // YouTube IFrame Player instance (not reactive — plain JS object)
     let ytPlayer = null;
 
@@ -2587,12 +2591,23 @@ createApp({
     }
 
     // ── Apply a remote playback command received from the Host ──
-    function applyRemote({ action, ts }) {
-      flashSync();
-      remoteApply = true;
+    //
+    // Race condition: video_source and playback_control arrive almost
+    // simultaneously. loadVideo() sets videoSrc.value synchronously (so
+    // hasVideo = true), but vjsPlayer is initialised asynchronously (nextTick
+    // + Video.js init). If applyRemote fires before init completes, vjsPlayer
+    // is still null — the command must NOT be silently dropped.
+    //
+    // Fix: store the command in pendingRemoteCmd. initVideoJsPlayer() drains
+    // it the moment the player is ready.
+    function applyRemote(cmd) {
+      const { action, ts } = cmd;
 
       if (videoType.value === 'youtube' && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
         // ── YouTube sync ──────────────────────────────────────
+        flashSync();
+        remoteApply = true;
+
         const currentT = ytPlayer.getCurrentTime?.() ?? 0;
         const drift    = Math.abs(currentT - ts);
 
@@ -2606,9 +2621,20 @@ createApp({
           ytPlayer.seekTo(ts, true);
         }
 
+        setTimeout(() => { remoteApply = false; }, 650);
+
       } else {
         // ── Video.js sync ─────────────────────────────────────
-        if (!vjsPlayer) { remoteApply = false; return; }
+        if (!vjsPlayer) {
+          // Player not ready yet — queue and wait; initVideoJsPlayer drains
+          // this as soon as the player finishes initialising.
+          pendingRemoteCmd = cmd;
+          return;
+        }
+
+        flashSync();
+        remoteApply = true;
+
         const drift = Math.abs(vjsPlayer.currentTime() - ts);
 
         if (action === 'play') {
@@ -2620,10 +2646,10 @@ createApp({
         } else if (action === 'seek') {
           vjsPlayer.currentTime(ts);
         }
-      }
 
-      // Release guard after player events have settled
-      setTimeout(() => { remoteApply = false; }, 650);
+        // Release guard after player events have settled
+        setTimeout(() => { remoteApply = false; }, 650);
+      }
     }
 
     function flashSync() {
@@ -2678,6 +2704,17 @@ createApp({
       vjsPlayer.on('error', () => {
         if (_currentTvChannelRef.value) tryNextServer();
       });
+
+      // ── Drain any queued remote command that arrived before we were ready ──
+      // applyRemote() stores the command in pendingRemoteCmd when vjsPlayer is
+      // null (race condition: playback_control beats the async player init).
+      // Now that the player exists, apply it immediately.
+      if (pendingRemoteCmd) {
+        const cmd = pendingRemoteCmd;
+        pendingRemoteCmd = null;
+        // Small delay so the player has a chance to attach the media source
+        setTimeout(() => applyRemote(cmd), 300);
+      }
 
       return vjsPlayer;
     }
