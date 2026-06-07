@@ -2499,8 +2499,25 @@ createApp({
       // manually paste the URL themselves.
       channel.on('broadcast', { event: 'video_source' }, ({ payload }) => {
         if (isHost.value) return; // guard (self:false already prevents echo)
+
+        // ── Same-source guard ─────────────────────────────────────────────────
+        // broadcastCurrentState() is called on every "Sync All" press, which
+        // always includes a video_source event even when the video hasn't changed.
+        // If the peer already has the same source loaded, calling loadVideo()
+        // again would restart the video from 0 (vjs.src() resets position) and
+        // show the "Click to Watch" overlay unnecessarily.
+        // Solution: skip the reload entirely — the playback_control that arrives
+        // right after this event will handle the position / play-state sync.
+        const alreadySameSource =
+          (payload.type === 'native'  && payload.url === videoSrc.value  && videoType.value === 'native')  ||
+          (payload.type === 'youtube' && payload.id  === ytVideoId.value && videoType.value === 'youtube') ||
+          (payload.type === 'iframe'  && payload.url === iframeSrc.value && videoType.value === 'iframe');
+
+        if (alreadySameSource) return; // position sync handled by the upcoming playback_control
+
+        // ── New source — load it ──────────────────────────────────────────────
         remoteSourceApply = true;
-        watchPartyReady.value = false; // new video → show overlay again (browser needs fresh gesture)
+        watchPartyReady.value = false; // different video → overlay must appear (needs fresh gesture)
 
         // Reconstruct the URL the peer should load
         urlInput.value =
