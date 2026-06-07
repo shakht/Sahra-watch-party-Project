@@ -2002,18 +2002,17 @@ const AVATAR_PALETTE = [
 const isDemoMode = () => SUPABASE_URL.includes('YOUR_PROJECT');
 
 /**
- * Ping the Supabase REST health endpoint to confirm the project is
- * awake and responding — not just accepting WebSocket handshakes.
- * A paused project returns a non-2xx status.
+ * Keep the Supabase free-tier project alive by touching its health endpoint.
+ * Uses /auth/v1/health which supports CORS from any origin (unlike /rest/v1/).
  */
 async function pingSupabase() {
   if (isDemoMode()) return true;
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/`, {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
       headers: { apikey: SUPABASE_ANON_KEY },
       signal: AbortSignal.timeout(6000),
     });
-    return res.ok || res.status === 404; // 404 = no tables yet but project is alive
+    return res.ok;
   } catch {
     return false;
   }
@@ -2437,14 +2436,9 @@ createApp({
       // ── Subscribe then begin presence tracking ───────────
       await channel.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          // Verify the project is truly reachable (not just WebSocket handshake)
-          // by pinging the REST health endpoint before marking as connected.
-          const alive = await pingSupabase();
-          if (!alive) {
-            connStatus.value = 'disconnected';
-            sysMsg('⚠ Supabase project is paused — go to supabase.com/dashboard and click "Restore project", then reload.');
-            return;
-          }
+          // SUBSCRIBED = WebSocket handshake + Realtime channel confirmed.
+          // This is the reliable connectivity signal — REST ping is separate
+          // and fails on GitHub Pages due to CORS, so we don't use it here.
           connStatus.value = 'connected';
           // Schedule a keep-alive ping every 3 days to prevent auto-pausing
           scheduleKeepAlive();
