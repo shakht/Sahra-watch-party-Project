@@ -416,58 +416,39 @@
       to   { transform: scale(1);   opacity: 1; }
     }
 
-    /* ── "Click to Watch" Join Overlay ──
-       Shown to peers only — browser autoplay policy requires one user
-       gesture before programmatic play() is allowed. This one click
-       unlocks the player for the whole session. */
-    .watch-overlay {
+    /* ── "Tap to Unmute" badge ──
+       Peers auto-play muted (no gesture needed). This small badge lets
+       them enable audio with one click, which also primes the browser
+       for all future host play() commands. */
+    .unmute-badge {
       position: absolute;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.72);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 55;
-      cursor: pointer;
-      backdrop-filter: blur(2px);
-      transition: background 0.2s ease;
-    }
-    .watch-overlay:hover { background: rgba(0, 0, 0, 0.60); }
-    .watch-overlay-inner {
-      text-align: center;
-      user-select: none;
-      pointer-events: none;
-    }
-    .watch-overlay-icon {
-      width: 88px;
-      height: 88px;
-      border-radius: 50%;
-      background: var(--accent-red);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 36px;
-      margin: 0 auto 20px;
-      box-shadow: 0 0 0 0 rgba(229,9,20,0.5);
-      animation: watchPulse 2s ease-in-out infinite;
-      padding-left: 5px; /* optical centering of ▶ */
-    }
-    @keyframes watchPulse {
-      0%   { box-shadow: 0 0 0  0   rgba(229,9,20,0.55); }
-      60%  { box-shadow: 0 0 0 22px rgba(229,9,20,0.00); }
-      100% { box-shadow: 0 0 0  0   rgba(229,9,20,0.00); }
-    }
-    .watch-overlay-title {
-      font-size: 22px;
-      font-weight: 800;
+      bottom: 64px;          /* sit just above the Video.js control bar */
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.80);
       color: #fff;
-      margin-bottom: 8px;
-      letter-spacing: 0.02em;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 999px;
+      padding: 10px 22px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      z-index: 55;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      backdrop-filter: blur(6px);
+      transition: background 0.18s ease, transform 0.18s ease;
+      animation: unmutePop 0.3s cubic-bezier(0.2, 0.8, 0.4, 1) both;
     }
-    .watch-overlay-sub {
-      font-size: 13px;
-      color: rgba(255,255,255,0.60);
-      font-weight: 500;
+    .unmute-badge:hover {
+      background: rgba(229, 9, 20, 0.85);
+      transform: translateX(-50%) scale(1.04);
+    }
+    @keyframes unmutePop {
+      from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+      to   { opacity: 1; transform: translateX(-50%) translateY(0); }
     }
 
     /* ── Sync Flash Indicator ── */
@@ -1489,22 +1470,18 @@
         </div>
       </div>
 
-      <!-- ── "Click to Watch" Join Overlay ──
-           Browser autoplay policy blocks programmatic play() unless the user
-           has made a gesture first. This overlay acts as that required gesture.
-           Peers click once → autoplay unlocked → host controls take over.
-           Hidden for the host (they loaded the video themselves). -->
-      <div
-        class="watch-overlay"
-        v-if="!isHost && videoType === 'native' && videoSrc && !watchPartyReady"
-        @click="joinWatchParty"
+      <!-- ── "Tap to Unmute" badge ──
+           Peers auto-play muted so host controls work immediately with no
+           manual interaction. This badge lets them enable audio at any time.
+           Clicking it also primes the browser for future unmuted play() calls. -->
+      <button
+        class="unmute-badge"
+        v-if="!isHost && videoType === 'native' && videoSrc && needsUnmute"
+        @click="unmutePeer"
+        :title="t('tapToUnmute')"
       >
-        <div class="watch-overlay-inner">
-          <div class="watch-overlay-icon">▶</div>
-          <div class="watch-overlay-title">{{ t('clickToWatch') }}</div>
-          <div class="watch-overlay-sub">{{ t('clickToWatchSub') }}</div>
-        </div>
-      </div>
+        🔇 {{ t('tapToUnmute') }}
+      </button>
 
       <!-- Sync pulse badge (flashes when peer receives host sync) -->
       <div class="sync-indicator" :class="{ visible: syncPulse }">⟳ Syncing</div>
@@ -2011,8 +1988,7 @@ const STRINGS = {
     // Video
     placeholderText:'Paste a video URL or any streaming site link below to begin',
     placeholderHint:'YouTube · .mp4 · .m3u8 · any streaming page',
-    clickToWatch:'Click to Watch',
-    clickToWatchSub:'You\'ll sync to the host automatically',
+    tapToUnmute:'Tap to Unmute',
     countdownLabel:'Get ready to press play',
     // Live TV panel
     liveTVTitle:'Live TV Channels',
@@ -2052,8 +2028,7 @@ const STRINGS = {
     // Video
     placeholderText:'الصق رابط الفيديو أو أي رابط بث أسفله للبدء',
     placeholderHint:'يوتيوب · mp4. · m3u8. · أي صفحة بث',
-    clickToWatch:'انقر للمشاهدة',
-    clickToWatchSub:'ستتزامن مع المضيف تلقائياً',
+    tapToUnmute:'انقر لرفع الكتم',
     countdownLabel:'استعد للضغط على تشغيل',
     // Live TV panel
     liveTVTitle:'قنوات البث المباشر',
@@ -2240,11 +2215,11 @@ createApp({
     const videoSrc     = ref('');
     const urlInput     = ref('');
     const videoTitle   = ref('');
-    const syncPulse       = ref(false);
-    // Tracks whether this peer has clicked "Click to Watch".
-    // Browser autoplay policy requires a user gesture before play() succeeds.
-    // The overlay provides that gesture. Host is always ready (they loaded it).
-    const watchPartyReady = ref(false);
+    const syncPulse   = ref(false);
+    // True while the peer is in muted-autoplay state.
+    // The video plays silently so host controls work immediately;
+    // the badge lets the peer unmute with one click.
+    const needsUnmute = ref(false);
 
     // 'native' = direct file URL  |  'youtube' = YouTube IFrame API  |  'iframe' = embedded webpage
     const videoType      = ref('native');
@@ -2470,6 +2445,20 @@ createApp({
         setTimeout(broadcastCurrentState, 400);
       });
 
+      // ── Broadcast: host_takeover ────────────────────────────
+      // Fired when someone claims host. All current hosts step down so
+      // there is always exactly ONE host badge shown in the sidebar.
+      channel.on('broadcast', { event: 'host_takeover' }, async ({ payload }) => {
+        if (!isHost.value) return; // already a viewer — nothing to do
+        // Someone else took over — demote ourselves
+        isHost.value = false;
+        sessionStorage.removeItem(`sahra_host_${roomId.value}`);
+        if (channel) {
+          await channel.track({ username: nickname.value, isHost: false });
+        }
+        sysMsg(`${payload?.newHost ?? 'Someone'} is now the Host`);
+      });
+
       // ── Broadcast: chat_message ──────────────────────────
       channel.on('broadcast', { event: 'chat_message' }, ({ payload }) => {
         pushMsg({
@@ -2517,7 +2506,6 @@ createApp({
 
         // ── New source — load it ──────────────────────────────────────────────
         remoteSourceApply = true;
-        watchPartyReady.value = false; // different video → overlay must appear (needs fresh gesture)
 
         // Reconstruct the URL the peer should load
         urlInput.value =
@@ -2688,31 +2676,16 @@ createApp({
     }
 
     /**
-     * Called when a peer clicks the "Click to Watch" overlay.
+     * Called when a peer clicks the "🔇 Tap to Unmute" badge.
      *
-     * Why this exists:
-     * Browsers block programmatic play() calls unless there has been a recent
-     * user gesture (a click, tap, etc.). The overlay provides exactly that
-     * gesture. Once the user clicks:
-     *   1. play() is called synchronously — this primes the browser.
-     *   2. We discard the stale queued command (timing will be off).
-     *   3. We ask the host for its CURRENT position so we sync perfectly.
-     *   4. The host's response calls applyRemote() → seek + play at correct ts.
-     *   5. All future host play/pause/seek events work without any overlay.
+     * The video was already auto-playing muted (browsers always allow muted
+     * autoplay), so host play/pause/seek controls were already working.
+     * This click simply enables audio and registers a user gesture so that
+     * any future unmuted play() call (after a host-triggered pause) succeeds.
      */
-    function joinWatchParty() {
-      watchPartyReady.value = true;
-      pendingRemoteCmd = null; // discard stale command; fresh one comes via request_state
-
-      if (vjsPlayer) {
-        // This play() call carries the user gesture — it primes browser autoplay
-        // for the rest of the session, even after seek / pause / re-play.
-        vjsPlayer.play().catch(() => {});
-      }
-
-      // Ask host for their current position; they'll reply with broadcastCurrentState()
-      // which sends video_source + playback_control with the live timestamp.
-      emit('request_state', { from: nickname.value });
+    function unmutePeer() {
+      needsUnmute.value = false;
+      if (vjsPlayer) vjsPlayer.muted(false);
     }
 
     // ── Apply a remote playback command received from the Host ──
@@ -2764,7 +2737,16 @@ createApp({
 
         if (action === 'play') {
           if (drift > DRIFT_THRESHOLD) vjsPlayer.currentTime(ts);
-          vjsPlayer.play().catch(() => {});
+          if (vjsPlayer.paused()) {
+            // Try unmuted play first; fall back to muted if browser blocks it
+            // (happens if the user has never interacted with the page at all).
+            vjsPlayer.play().catch(() => {
+              vjsPlayer.muted(true);
+              vjsPlayer.play().catch(() => {});
+              needsUnmute.value = true; // show badge so they can unmute
+            });
+          }
+          // If already playing (muted autoplay) we only needed the seek above.
         } else if (action === 'pause') {
           if (drift > DRIFT_THRESHOLD) vjsPlayer.currentTime(ts);
           vjsPlayer.pause();
@@ -2947,6 +2929,25 @@ createApp({
 
         if (isHost.value && !remoteSourceApply) {
           emit('video_source', { type: 'native', url: u });
+        }
+
+        // ── Peer muted autoplay ──────────────────────────────────────────────
+        // Browsers always allow muted autoplay — no user gesture required.
+        // Starting muted means host play/pause/seek broadcasts work immediately
+        // (no "click to watch" interaction needed). The 🔇 badge lets the peer
+        // unmute with one click, which also registers the gesture for future
+        // unmuted play() calls triggered by the host.
+        if (!isHost.value) {
+          needsUnmute.value = true;
+          vjsPlayer.muted(true);
+          // Small delay so VHS/HLS has time to start buffering before play()
+          setTimeout(() => {
+            if (vjsPlayer && !isHost.value) {
+              vjsPlayer.play().catch(() => {});
+              // Request host's exact current position (play/pause state + timestamp)
+              emit('request_state', { from: nickname.value });
+            }
+          }, 500);
         }
 
       } else {
@@ -3134,9 +3135,14 @@ createApp({
       isHost.value = true;
       sessionStorage.setItem(`sahra_host_${roomId.value}`, '1');
       sysMsg(`${nickname.value} claimed host controls`);
-      toast('You are now the Host — your playback is synced to all peers');
+      toast('You are now the Host — your playback controls all viewers');
 
-      // Update presence so sidebar shows the HOST badge
+      // Tell every other participant (including any previous host) to step down.
+      // They receive host_takeover → set isHost=false → re-track presence.
+      // This guarantees exactly ONE host badge is shown at any time.
+      emit('host_takeover', { newHost: nickname.value });
+
+      // Update our own presence so the sidebar shows HOST badge for us
       if (channel) {
         await channel.track({ username: nickname.value, isHost: true });
       }
@@ -3259,7 +3265,7 @@ createApp({
       videoType, ytVideoId, iframeSrc, showIframeNotice, iframeNoticeHtml,
       showCountdown, countdownNum,
       syncTimeInput, broadcastSyncPoint,
-      watchPartyReady, joinWatchParty,
+      needsUnmute, unmutePeer,
       onPlay, onPause, onSeeked, loadVideo, forceSyncPeers,
       // Participants
       onlineUsers, colorOf,
