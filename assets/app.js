@@ -1611,7 +1611,15 @@ createApp({
             signal: AbortSignal.timeout(16000)
           });
           const result = await response.json();
-          if (!response.ok) throw new Error(result.error || 'Movie resolver is unavailable.');
+          if (!response.ok) {
+            if (result.code === 'UPSTREAM_REJECTED') {
+              mediaError.value = lang.value === 'ar' ?
+                'تعذر الوصول إلى هذا الفيلم من خادم سهرة. الموقع يعيد خطأ ' + result.upstreamStatus + '. يمكنك استخدام رابط فيديو مباشر.' :
+                'Albox returned HTTP ' + result.upstreamStatus + ' to Sahra’s server. This movie cannot be resolved from the server; you can still use a direct video link.';
+              return;
+            }
+            throw new Error(result.error || 'Movie resolver is unavailable.');
+          }
           if (!Array.isArray(result.videos) || !result.videos.length) throw new Error('No video sources found.');
           resolvedMedia.value = result;
           return;

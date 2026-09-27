@@ -293,7 +293,6 @@
         <label for="video-url">{{ t('videoLink') }}</label>
         <div class="input-action"><input id="video-url" class="field ltr-always" v-model="urlInput" type="url" name="video-url" autocomplete="off" spellcheck="false" :placeholder="t('srcPlaceholder')" @keydown.enter="loadVideo"/><button class="btn btn-primary" @click="loadVideo">{{ t('btnLoad') }}</button></div>
         <p v-if="resolvingMedia" role="status">{{ lang === 'ar' ? 'جارٍ البحث عن الفيديو والترجمة…' : 'Finding video and subtitles…' }}</p>
-        <p v-if="mediaError" role="alert">{{ mediaError }}</p>
         <div v-if="resolvedMedia" class="settings-section">
           <h3>{{ resolvedMedia.title }}</h3>
           <p>{{ lang === 'ar' ? 'اختر الجودة لبدء المشاهدة' : 'Choose a quality to start watching' }}</p>

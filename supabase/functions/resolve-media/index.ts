@@ -30,7 +30,7 @@ export async function handle(req: Request, request = fetch) {
   try {
     const response = await request(`https://cinema.albox.co/api/v4/shows/episodes/${id}/files`,
       { redirect: 'error', signal: AbortSignal.timeout(12000), headers: { Accept: 'application/json' } });
-    if (!response.ok) return reply(502, { error: 'Albox could not provide this video.' });
+    if (!response.ok) return reply(502, { error: `Albox rejected the server request (HTTP ${response.status}).`, code: 'UPSTREAM_REJECTED', upstreamStatus: response.status });
     const data = await response.json();
     const videos = (Array.isArray(data.videos) ? data.videos : []).slice(0,10)
       .filter((v: any) => mediaUrl(v.url, '.mp4')).map((v: any) => ({ url: v.url, quality: String(v.quality || 'Video').slice(0,20) }));

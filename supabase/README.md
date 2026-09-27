@@ -18,4 +18,6 @@ Test after deployment: paste an Albox playback-page link into Sahra, press Load,
 
 Albox must be reachable from the Supabase region as well as each viewer's network. Local metadata tests do not guarantee cloud-region access. Provider API changes may require resolver updates. No authentication, DRM, or access restrictions are bypassed.
 
+Deployment check (2026-09-27): `resolve-media` is deployed with JWT verification enabled. Albox movie 1071678 resolves from the local PC, but the deployed function receives HTTP 404 from the upstream metadata endpoint and reports `UPSTREAM_REJECTED`. Cloud resolution is not operational for this test movie; deployment alone does not resolve that upstream difference.
+
 Deployment reference: https://supabase.com/docs/guides/functions/deploy
