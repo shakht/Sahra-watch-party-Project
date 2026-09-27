@@ -5,18 +5,18 @@ const fs = require('node:fs');
 const { randomUUID } = require('node:crypto');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../assets/app.js'), 'utf8');
 
-async function harness({ name, room, blockedStorage = false } = {}) {
-  let now = Date.now();
+async function harness({ name, room, blockedStorage = false, sessionData, nowMs } = {}) {
+  let now = nowMs ?? Date.now();
   class TestDate extends Date { static now() { return now; } }
   const data = new Map(name ? [['sahra_nick', name]] : []);
-  const session = new Map();
+  const session = sessionData || new Map();
   const storage = map => ({
     getItem(k) { if (blockedStorage) throw Error('Blocked'); return map.get(k) ?? null; },
     setItem(k, v) { if (blockedStorage) throw Error('Blocked'); map.set(k, v); },
     removeItem(k) { map.delete(k); },
   });
   let app, mounted, subscription, presence = {}, config;
-  const handlers = new Map(), sent = [], tracked = [], intervals = new Map();
+  const handlers = new Map(), sent = [], tracked = [], intervals = new Map(), windowEvents = new Map();
   let timerId = 0;
   const channel = {
     on(kind, { event }, fn) { handlers.set(`${kind}:${event}`, fn); return this; },
@@ -51,7 +51,7 @@ async function harness({ name, room, blockedStorage = false } = {}) {
     console, URL, URLSearchParams, crypto: { randomUUID }, videojs, YT, Date: TestDate,
     fetch: async () => ({ json: async () => ({}) }),
     localStorage: storage(data), sessionStorage: storage(session),
-    window: { location, YT, history: { replaceState(_s, _t, url) { location.href = url; } } },
+    window: { location, YT, addEventListener(event, fn) { windowEvents.set(event, fn); }, history: { replaceState(_s, _t, url) { location.href = url; } } },
     document: { documentElement: {} }, navigator: {},
     setTimeout: () => ++timerId, clearTimeout() {},
     setInterval(fn) { const id = ++timerId; intervals.set(id, fn); return id; },
@@ -66,6 +66,7 @@ async function harness({ name, room, blockedStorage = false } = {}) {
   vm.runInNewContext(source, context);
   await mounted();
   return { app, data, session, location, tracked, sent, handlers, intervals, document: context.document,
+    pagehide() { windowEvents.get('pagehide')(); },
     yt, ytReady() { ytEvents.onReady(); },
     ytEvent(state, time = ytTime) { ytState = state; ytTime = time; ytEvents.onStateChange({ data: state }); },
     advance(ms) { now += ms; }, get now() { return now; },
@@ -82,7 +83,7 @@ test('first visit saves name before choosing create/join', async () => {
   await h.app.saveProfile();
   assert.equal(h.data.get('sahra_nick'), 'علي');
   assert.equal(h.app.modalMode.value, 'landing');
-  h.app.chooseModeCreate();
+  await h.app.chooseModeCreate();
   assert.equal(h.app.showModal.value, false);
   assert.equal(h.app.isHost.value, true);
 });
@@ -147,7 +148,7 @@ test('new party records host role before navigation', async () => {
 
 test('newer host wins when disconnected host returns', async () => {
   const h = await harness({ name: 'Ali' });
-  h.app.chooseModeCreate(); await h.status('SUBSCRIBED');
+  await h.app.chooseModeCreate(); await h.status('SUBSCRIBED');
   await h.presence({ [h.app.participantId]: [h.tracked.at(-1)], peer: [{ username: 'Noor', isHost: true, hostSince: Date.now() + 1000 }] });
   assert.equal(h.app.isHost.value, false);
   assert.equal(h.tracked.at(-1).isHost, false);
@@ -155,7 +156,7 @@ test('newer host wins when disconnected host returns', async () => {
 
 test('local blob URLs never leave the host during resync', async () => {
   const h = await harness({ name: 'Ali' });
-  h.app.chooseModeCreate();
+  await h.app.chooseModeCreate();
   h.app.videoSrc.value = 'blob:https://example.test/private-file';
   h.app.broadcastCurrentState();
   assert.equal(h.sent.some(m => m.event === 'video_source'), false);
@@ -163,7 +164,7 @@ test('local blob URLs never leave the host during resync', async () => {
 
 test('stale presence from before reload does not demote the returning host', async () => {
   const h = await harness({ name: 'Ali' });
-  h.app.chooseModeCreate(); await h.status('SUBSCRIBED');
+  await h.app.chooseModeCreate(); await h.status('SUBSCRIBED');
   await h.presence({ stale: [{ username: 'Ali', isHost: true, hostSince: 1 }] });
   assert.equal(h.app.isHost.value, true);
 });
@@ -209,7 +210,7 @@ test('changing language updates document language and reading direction', async 
 
 async function youtubeHarness(host = false) {
   const h = await harness({ name: host ? 'Host' : 'Viewer', room: host ? undefined : 'ABC123' });
-  if (host) h.app.chooseModeCreate();
+  if (host) await h.app.chooseModeCreate();
   await h.status('SUBSCRIBED');
   h.app.urlInput.value = 'https://www.youtube.com/watch?v=M7lc1UVf-VE';
   await h.app.loadVideo(); h.ytReady();
@@ -286,4 +287,55 @@ test('late-ready YouTube player applies the queued room state', async () => {
   h.ytReady();
   assert.equal(h.yt.getCurrentTime(), 42);
   assert.equal(h.yt.getPlayerState(), 2);
+});
+
+
+for (const playing of [false, true]) {
+  test(`host refresh restores YouTube ${playing ? 'playing with elapsed time' : 'paused at the same position'}`, async () => {
+    const h = await youtubeHarness(true);
+    h.ytEvent(playing ? 1 : 2, 73);
+    h.pagehide();
+    const room = h.app.roomId.value;
+    const restored = await harness({ name: 'Host', room, sessionData: new Map(h.session), nowMs: h.now + 3000 });
+    assert.equal(restored.app.isHost.value, true);
+    assert.equal(restored.app.ytVideoId.value, 'M7lc1UVf-VE');
+    await restored.status('SUBSCRIBED');
+    assert.equal(restored.sent.filter(m => m.event === 'playback_control').length, 0);
+    restored.ytReady();
+    assert.equal(restored.yt.getCurrentTime(), playing ? 76 : 73);
+    assert.equal(restored.yt.getPlayerState(), playing ? 1 : 2);
+  });
+}
+
+test('host refresh restores native source and waits for metadata before seeking', async () => {
+  const h = await harness({ name: 'Host' });
+  await h.app.chooseModeCreate();
+  h.app.urlInput.value = 'https://example.test/movie.mp4';
+  await h.app.loadVideo(); h.metadata();
+  h.player.currentTime(42); h.pagehide();
+  const restored = await harness({ name: 'Host', room: h.app.roomId.value, sessionData: new Map(h.session), nowMs: h.now + 1000 });
+  assert.equal(restored.app.videoSrc.value, 'https://example.test/movie.mp4');
+  assert.equal(restored.player.currentTime(), 0);
+  restored.metadata();
+  assert.equal(restored.player.currentTime(), 42);
+  assert.equal(restored.player.paused(), true);
+});
+
+test('viewer never restores a stale host snapshot', async () => {
+  const h = await youtubeHarness(true); h.pagehide();
+  const room = h.app.roomId.value, session = new Map(h.session);
+  session.delete(`sahra_host_${room}`);
+  const restored = await harness({ name: 'Viewer', room, sessionData: session });
+  assert.equal(restored.app.isHost.value, false);
+  assert.equal(restored.app.ytVideoId.value, '');
+  await restored.status('SUBSCRIBED');
+  assert.ok(restored.sent.some(m => m.event === 'request_state'));
+});
+
+test('invalid saved playback does not prevent joining the room', async () => {
+  for (const saved of ['{broken', JSON.stringify({ version: 1, type: 'youtube', source: 'M7lc1UVf-VE', action: 'pause', ts: 4, savedAt: 0 })]) {
+    const restored = await harness({ name: 'Host', room: 'ABC123', sessionData: new Map([['sahra_host_ABC123', '1'], ['sahra_playback_ABC123', saved]]) });
+    await restored.status('SUBSCRIBED');
+    assert.equal(restored.app.ytVideoId.value, '');
+  }
 });

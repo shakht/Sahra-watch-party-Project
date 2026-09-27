@@ -614,6 +614,71 @@ createApp({
     let hostClock = { id: null, offset: 0, rtt: Infinity };
     let clockProbe = null;
     let syncTicks = 0;
+    let restoringRoom = null;
+
+    function saveRoomPlayback() {
+      if (!isHost.value || !roomId.value || restoringRoom || hasLeft.value) return;
+      const type = videoType.value;
+      const source = type === 'youtube' ? ytVideoId.value : type === 'native' ? videoSrc.value : iframeSrc.value;
+      if (!source) return;
+      const snapshot = { version: 1, type, source, title: videoTitle.value, ts: 0, action: 'pause', rate: 1, savedAt: Date.now() };
+      if (type === 'youtube' && ytReady) {
+        snapshot.ts = ytPlayer.getCurrentTime();
+        snapshot.action = ytPlayer.getPlayerState() === YT.PlayerState.PLAYING ? 'play' : 'pause';
+        snapshot.rate = ytPlayer.getPlaybackRate?.() || 1;
+        if (expectedYT && latestPlayback) {
+          snapshot.ts = playbackPosition(latestPlayback);
+          snapshot.action = latestPlayback.action;
+        }
+      } else if (type === 'native' && vjsPlayer?.readyState() >= 1) {
+        snapshot.ts = vjsPlayer.currentTime();
+        snapshot.action = vjsPlayer.paused() ? 'pause' : 'play';
+      }
+      if (source.startsWith('blob:')) { snapshot.type = 'local'; delete snapshot.source; }
+      preferences.set(`sahra_playback_${roomId.value}`, JSON.stringify(snapshot), true);
+    }
+
+    function finishRoomRestore() {
+      if (!restoringRoom) return;
+      if (videoType.value === 'youtube' && !ytReady) return;
+      if (videoType.value === 'native' && (!vjsPlayer || vjsPlayer.readyState() < 1)) return;
+      const saved = restoringRoom;
+      restoringRoom = null;
+      if (videoType.value !== 'iframe') {
+        applyRemote({ action: saved.action, ts: saved.ts, rate: saved.rate,
+          sentAt: saved.savedAt, hostId: participantId, media: mediaIdentity() });
+      }
+      saveRoomPlayback();
+    }
+
+    async function restoreRoomPlayback() {
+      if (!isHost.value || videoSrc.value || ytVideoId.value || iframeSrc.value) return;
+      let saved;
+      try { saved = JSON.parse(preferences.get(`sahra_playback_${roomId.value}`, true)); } catch { return; }
+      if (!saved || saved.version !== 1 || !['youtube', 'native', 'iframe', 'local'].includes(saved.type) ||
+        !['play', 'pause'].includes(saved.action) || !Number.isFinite(saved.ts) || saved.ts < 0 ||
+        !Number.isFinite(saved.savedAt) || Date.now() - saved.savedAt > 86400000 || saved.savedAt > Date.now() + 60000) return;
+      if (saved.type === 'local') {
+        mediaError.value = lang.value === 'ar' ? 'أعد اختيار ملف الفيديو من جهازك بعد تحديث الصفحة.' : 'Please select your local video file again after refreshing.';
+        return;
+      }
+      if (saved.type === 'youtube') {
+        if (!/^[\w-]{11}$/.test(saved.source)) return;
+        urlInput.value = `https://www.youtube.com/watch?v=${saved.source}`;
+      } else {
+        try { if (new URL(saved.source).protocol !== 'https:') return; } catch { return; }
+        urlInput.value = saved.source;
+      }
+      restoringRoom = { ...saved, rate: Number.isFinite(saved.rate) && saved.rate > 0 ? saved.rate : 1 };
+      try {
+        await loadVideoSource();
+        videoTitle.value = saved.title || videoTitle.value;
+        finishRoomRestore();
+      } catch {
+        restoringRoom = null;
+        mediaError.value = t('mediaFailed');
+      }
+    }
 
     function mediaIdentity() {
       return videoType.value === 'youtube' ? `youtube:${ytVideoId.value}` :
@@ -694,6 +759,7 @@ createApp({
     // ════════════════════════════════════════════════════════
     onMounted(async () => {
       applyLocale();
+      window.addEventListener?.('pagehide', saveRoomPlayback);
       updateViewport();
       window.visualViewport?.addEventListener('resize', updateViewport);
       window.addEventListener?.('resize', updateViewport);
@@ -731,6 +797,7 @@ createApp({
 
     onUnmounted(teardown);
     onUnmounted(() => {
+      window.removeEventListener?.('pagehide', saveRoomPlayback);
       window.visualViewport?.removeEventListener('resize', updateViewport);
       window.removeEventListener?.('resize', updateViewport);
       document.removeEventListener?.('click', onPageClick);
@@ -776,8 +843,7 @@ createApp({
       pushRoomToUrl(rid);
       if (nickname.value) {
         showModal.value = false;
-        boot();
-        return;
+        return boot();
       }
       nameInput.value = nickname.value;
       modalMode.value = 'create';
@@ -822,6 +888,8 @@ createApp({
         isHost.value = true;
       }
       // Joiners arriving via a shared link start as viewers
+
+      await restoreRoomPlayback();
 
       sysMsg(`You joined room ${roomId.value} as ${isHost.value ? 'Host ⚡' : 'Viewer 👁'}`);
 
@@ -1169,6 +1237,8 @@ createApp({
      */
     function broadcastCurrentState() {
       if (!isHost.value) return;
+      if (restoringRoom) return;
+      saveRoomPlayback();
 
       if (videoType.value === 'youtube' && ytVideoId.value) {
         // ── YouTube ──────────────────────────────────────────
@@ -1365,6 +1435,7 @@ createApp({
       });
 
       vjsPlayer.on('loadedmetadata', () => {
+        finishRoomRestore();
         if (pendingRemoteCmd && videoType.value === 'native') {
           const cmd = pendingRemoteCmd;
           pendingRemoteCmd = null;
@@ -1502,6 +1573,7 @@ createApp({
       if (!urlInput.value.trim()) return;
       try {
         await loadVideoSource();
+        saveRoomPlayback();
         if (!mediaError.value) closeControls();
       }
       catch (error) {
@@ -1651,6 +1723,7 @@ createApp({
         events: {
           onReady() {
             ytReady = true;
+            finishRoomRestore();
             if (!isHost.value) { ytPlayer.mute(); needsUnmute.value = true; }
             toast('YouTube ready — play and pause are shared with the room');
             if (pendingRemoteCmd) {
@@ -1832,6 +1905,9 @@ createApp({
      */
     async function leaveParty() {
       showExitConfirm.value = false;
+      hasLeft.value = true;
+      restoringRoom = null;
+      preferences.remove(`sahra_playback_${roomId.value}`, true);
 
       // Stop all media so audio doesn't keep playing under the left-party screen
       if (vjsPlayer) { vjsPlayer.pause(); vjsPlayer.src(''); }
@@ -1913,6 +1989,8 @@ createApp({
     //  SUPABASE EMIT HELPER
     // ════════════════════════════════════════════════════════
     function emit(event, payload) {
+      if (restoringRoom && (event === 'video_source' || event === 'playback_control')) return;
+      if (event === 'playback_control') saveRoomPlayback();
       if (!channel || isDemoMode() || connStatus.value !== 'connected') return;
       if (event === 'playback_control') {
         payload = { ...payload, sentAt: Date.now(), hostId: participantId, sequence: ++playbackSequence,

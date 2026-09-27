@@ -24,6 +24,8 @@ First-time visitors choose a name before creating or joining a room. The name is
 
 Each connection has a unique participant ID so friends with identical names remain separate. Host claims use a timestamp and participant-ID tie-breaker to reconcile simultaneous claims and reconnects. Hosts send a state refresh every two seconds; viewers request current state after reconnecting. This is cooperative client-side host management, not server-enforced access control. Anyone with a room link can join and claim host.
 
+The host saves the room's video and playback position in session storage and restores them after a page refresh. Playing videos account for time spent reloading; paused videos keep their position. Saved state expires after 24 hours and is cleared when leaving the room. Browsers may require a tap to resume sound. Local files must be selected again after refreshing; embedded pages restore their URL but cannot restore playback inside the embed.
+
 For YouTube, anyone can play or pause. Viewers send a request to the host, which orders and broadcasts the change to everyone. Commands include a sequence number, source identity, playback rate, and host timestamp. Clock probes compensate for different device clocks and transport delay. Viewers correct drift above 350 ms, align paused positions more tightly, and catch up after buffering. This is a correction threshold, not a guaranteed maximum error: YouTube buffering, ads, browser autoplay restrictions, and network conditions can still cause temporary differences. On mobile, tap the unmute button to enable sound. Native files remain host-controlled.
 
 ## Watching and chatting
