@@ -574,6 +574,15 @@ createApp({
     // ────────────────────────────────────────────────────────
     //  SUBTITLES (Video.js text tracks)
     // ────────────────────────────────────────────────────────
+    const resolvingMedia = ref(false);
+    const resolvedMedia = ref(null);
+    let sourceDetails = null;
+    async function loadResolvedVideo(video) {
+      if (!resolvedMedia.value?.videos.some(v => v.url === video.url)) return;
+      const details = resolvedMedia.value;
+      urlInput.value = video.url;
+      await loadVideo(details);
+    }
     const subtitleUrl     = ref('');
     const subtitleLang    = ref('en');
     const activeCcLabel   = ref(''); // e.g. "EN", "AR" — empty when no CC loaded
@@ -621,7 +630,7 @@ createApp({
       const type = videoType.value;
       const source = type === 'youtube' ? ytVideoId.value : type === 'native' ? videoSrc.value : iframeSrc.value;
       if (!source) return;
-      const snapshot = { version: 1, type, source, title: videoTitle.value, ts: 0, action: 'pause', rate: 1, savedAt: Date.now() };
+      const snapshot = { version: 1, type, source, title: videoTitle.value, details: sourceDetails, ts: 0, action: 'pause', rate: 1, savedAt: Date.now() };
       if (type === 'youtube' && ytReady) {
         snapshot.ts = ytPlayer.getCurrentTime();
         snapshot.action = ytPlayer.getPlayerState() === YT.PlayerState.PLAYING ? 'play' : 'pause';
@@ -671,7 +680,7 @@ createApp({
       }
       restoringRoom = { ...saved, rate: Number.isFinite(saved.rate) && saved.rate > 0 ? saved.rate : 1 };
       try {
-        await loadVideoSource();
+        await loadVideoSource(saved.details);
         videoTitle.value = saved.title || videoTitle.value;
         finishRoomRestore();
       } catch {
@@ -1099,7 +1108,7 @@ createApp({
           payload.type === 'iframe'  ? 'streaming page' :
                                        'video';
 
-        loadVideo().finally(() => { remoteSourceApply = false; });
+        loadVideo(payload.details).finally(() => { remoteSourceApply = false; });
         sysMsg(`▶ Host loaded a ${typeLabel}`);
       });
 
@@ -1254,7 +1263,7 @@ createApp({
 
       } else if (videoType.value === 'native' && videoSrc.value) {
         // ── Video.js / native ────────────────────────────────
-        if (!videoSrc.value.startsWith('blob:')) emit('video_source', { type: 'native', url: videoSrc.value });
+        if (!videoSrc.value.startsWith('blob:')) emit('video_source', { type: 'native', url: videoSrc.value, details: sourceDetails });
         if (vjsPlayer) {
           emit('playback_control', {
             action: vjsPlayer.paused() ? 'pause' : 'play',
@@ -1462,7 +1471,7 @@ createApp({
       en: 'EN', ar: 'AR', fr: 'FR', de: 'DE', es: 'ES', tr: 'TR',
     };
 
-    function addSubtitleTrack() {
+    function addSubtitleTrack(silent = false) {
       const url = subtitleUrl.value.trim();
       if (!vjsPlayer || !url) return;
 
@@ -1485,6 +1494,7 @@ createApp({
 
       activeCcLabel.value = label;
       subtitleUrl.value   = '';
+      if (silent === true) return;
       toast(`✅ Subtitles loaded (${label}) — CC button is in the player controls`);
 
       // Sync to peers via chat notice
@@ -1493,14 +1503,14 @@ createApp({
       emit('chat_message', { user: '⚡ Sync', text: body, ts: Date.now(), isHost: true });
     }
 
-    function clearSubtitles() {
+    function clearSubtitles(silent = false) {
       if (!vjsPlayer) return;
       const tracks = vjsPlayer.remoteTextTracks();
       for (let i = tracks.length - 1; i >= 0; i--) {
         vjsPlayer.removeRemoteTextTrack(tracks[i]);
       }
       activeCcLabel.value = '';
-      toast('Subtitles removed');
+      if (silent !== true) toast('Subtitles removed');
     }
 
     /**
@@ -1569,12 +1579,12 @@ createApp({
      * Parse the URL input and load either the Video.js player or
      * the YouTube IFrame player based on what the URL points to.
      */
-    async function loadVideo() {
-      if (!urlInput.value.trim()) return;
+    async function loadVideo(details = null) {
+      if (!urlInput.value.trim() || resolvingMedia.value) return;
       try {
-        await loadVideoSource();
+        await loadVideoSource(details);
         saveRoomPlayback();
-        if (!mediaError.value) closeControls();
+        if (!mediaError.value && !new URL(urlInput.value).hostname.endsWith('cinema.albox.co')) closeControls();
       }
       catch (error) {
         console.warn('Media load failed', error);
@@ -1582,7 +1592,7 @@ createApp({
       }
     }
 
-    async function loadVideoSource() {
+    async function loadVideoSource(details = null) {
       const u = urlInput.value.trim();
       if (!u) return;
       mediaError.value = '';
@@ -1590,6 +1600,29 @@ createApp({
         const url = new URL(u);
         if (!['https:', 'blob:'].includes(url.protocol)) throw new Error('Invalid protocol');
       } catch { mediaError.value = t('invalidMedia'); return; }
+
+      if (new URL(u).hostname === 'cinema.albox.co') {
+        resolvingMedia.value = true;
+        resolvedMedia.value = null;
+        try {
+          const response = await fetch(SUPABASE_URL + '/functions/v1/resolve-media', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY,
+              Authorization: 'Bearer ' + SUPABASE_ANON_KEY }, body: JSON.stringify({ url: u }),
+            signal: AbortSignal.timeout(16000)
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Movie resolver is unavailable.');
+          if (!Array.isArray(result.videos) || !result.videos.length) throw new Error('No video sources found.');
+          resolvedMedia.value = result;
+          return;
+        } catch (error) {
+          mediaError.value = lang.value === 'ar' ? 'تعذر جلب الفيلم. تحقق من نشر خدمة جلب الروابط ثم حاول مجدداً.' :
+            'Could not resolve this movie. Check that the media resolver is deployed, then try again.';
+          return;
+        } finally { resolvingMedia.value = false; }
+      }
+      sourceDetails = details && Array.isArray(details.videos) && details.videos.some(v => v.url === u) ? details : null;
+      resolvedMedia.value = sourceDetails;
 
       // Stop the previous source before displaying a different player.
       remoteApply = true;
@@ -1647,10 +1680,20 @@ createApp({
                    : /\.mpd/i.test(u)  ? 'application/dash+xml'
                    :                     'video/mp4';
         vjs.src({ src: u, type: mime });
+        clearSubtitles(true);
+        if (sourceDetails) {
+          videoTitle.value = String(sourceDetails.title || videoTitle.value);
+          const track = sourceDetails.subtitles?.find(s => s.language === lang.value) || sourceDetails.subtitles?.[0];
+          if (track && /^https:\/\/cloud\d+\.albox\.co\/[^?#]+\.vtt$/.test(track.url)) {
+            subtitleUrl.value = track.url;
+            subtitleLang.value = track.language;
+            addSubtitleTrack(true);
+          }
+        }
 
         // Blob URLs are local to this browser — don't broadcast them to peers
         if (isHost.value && !remoteSourceApply && !u.startsWith('blob:')) {
-          emit('video_source', { type: 'native', url: u });
+          emit('video_source', { type: 'native', url: u, details: sourceDetails });
         }
 
         // ── Peer muted autoplay ──────────────────────────────────────────────
@@ -2007,6 +2050,7 @@ createApp({
       // Language / i18n
       lang, isRTL, t, toggleLang, msgDir,
       // Subtitles (Video.js)
+      resolvingMedia, resolvedMedia, loadResolvedVideo,
       subtitleUrl, subtitleLang, activeCcLabel, addSubtitleTrack, clearSubtitles,
       subtitleFileRef, handleSubtitleFile,
       localFileRef, handleLocalFile,

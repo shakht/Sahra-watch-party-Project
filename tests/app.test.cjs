@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const { randomUUID } = require('node:crypto');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../assets/app.js'), 'utf8');
 
-async function harness({ name, room, blockedStorage = false, sessionData, nowMs } = {}) {
+async function harness({ name, room, blockedStorage = false, sessionData, nowMs, fetchImpl } = {}) {
   let now = nowMs ?? Date.now();
   class TestDate extends Date { static now() { return now; } }
   const data = new Map(name ? [['sahra_nick', name]] : []);
@@ -29,7 +29,11 @@ async function harness({ name, room, blockedStorage = false, sessionData, nowMs 
   const location = { href: `https://example.test/${room ? '?room=' + room : ''}`, search: room ? '?room=' + room : '' };
   let ready = 0, position = 0, paused = true;
   const mediaHandlers = new Map();
+  const tracks = [];
   const player = {
+    remoteTextTracks: () => tracks,
+    addRemoteTextTrack(track) { tracks.push(track); },
+    removeRemoteTextTrack(track) { tracks.splice(tracks.indexOf(track), 1); },
     on(event, fn) { mediaHandlers.set(event, fn); },
     readyState: () => ready, currentTime(value) { if (value !== undefined) position = value; return position; },
     paused: () => paused, pause() { paused = true; }, async play() { paused = false; },
@@ -49,7 +53,7 @@ async function harness({ name, room, blockedStorage = false, sessionData, nowMs 
     Player: function(_id, options) { ytEvents = options.events; return yt; } };
   const context = {
     console, URL, URLSearchParams, crypto: { randomUUID }, videojs, YT, Date: TestDate,
-    fetch: async () => ({ json: async () => ({}) }),
+    AbortSignal, fetch: fetchImpl || (async () => ({ json: async () => ({}) })),
     localStorage: storage(data), sessionStorage: storage(session),
     window: { location, YT, addEventListener(event, fn) { windowEvents.set(event, fn); }, history: { replaceState(_s, _t, url) { location.href = url; } } },
     document: { documentElement: {} }, navigator: {},
@@ -338,4 +342,36 @@ test('invalid saved playback does not prevent joining the room', async () => {
     await restored.status('SUBSCRIBED');
     assert.equal(restored.app.ytVideoId.value, '');
   }
+});
+
+test('Albox resolution waits for quality choice and attaches Arabic subtitles', async () => {
+ const url='https://cloud02.albox.co/episodes/movie.mp4';
+ const h=await harness({name:'Host',fetchImpl:async()=>({ok:true,json:async()=>({title:'Mutiny',videos:[{url,quality:'720p'}],subtitles:[{url:'https://cloud02.albox.co/episodes/sub.vtt',language:'ar'}]})})});
+ await h.app.chooseModeCreate(); await h.status('SUBSCRIBED');
+ h.app.urlInput.value='https://cinema.albox.co/show/play/1071678';await h.app.loadVideo();
+ assert.equal(h.app.videoSrc.value,'');assert.equal(h.app.resolvedMedia.value.title,'Mutiny');
+ await h.app.loadResolvedVideo(h.app.resolvedMedia.value.videos[0]);
+ assert.equal(h.app.videoSrc.value,url);assert.equal(h.app.videoTitle.value,'Mutiny');
+ assert.equal(h.player.remoteTextTracks()[0].srclang,'ar');
+ const message=h.sent.filter(m=>m.event==='video_source').at(-1);
+ assert.equal(message.payload.details.subtitles[0].language,'ar');
+ h.metadata();h.pagehide();
+ const restored=await harness({name:'Host',room:h.app.roomId.value,sessionData:new Map(h.session)});
+ assert.equal(restored.app.videoTitle.value,'Mutiny');assert.equal(restored.player.remoteTextTracks()[0].srclang,'ar');
+});
+
+test('failed resolver keeps the current video and does not use a broken iframe',async()=>{
+ const h=await harness({name:'Host',fetchImpl:async()=>({ok:false,json:async()=>({error:'Unavailable'})})});
+ await h.app.chooseModeCreate();h.app.urlInput.value='https://example.test/a.mp4';await h.app.loadVideo();
+ h.app.urlInput.value='https://cinema.albox.co/show/play/1071678';await h.app.loadVideo();
+ assert.equal(h.app.videoSrc.value,'https://example.test/a.mp4');assert.equal(h.app.iframeSrc.value,'');assert.ok(h.app.mediaError.value);
+});
+
+test('friends load resolved source metadata without calling resolver again',async()=>{
+ const h=await harness({name:'Viewer',room:'ABC123'});await h.status('SUBSCRIBED');
+ const url='https://cloud02.albox.co/episodes/movie.mp4';
+ h.handlers.get('broadcast:video_source')({payload:{type:'native',url,details:{title:'Mutiny',videos:[{url,quality:'720p'}],subtitles:[{url:'https://cloud02.albox.co/episodes/sub.vtt',language:'ar'}]}}});
+ for(let i=0;i<8;i++) await Promise.resolve();
+ assert.equal(h.app.videoTitle.value,'Mutiny');assert.equal(h.player.remoteTextTracks()[0].srclang,'ar');
+ assert.equal(h.sent.filter(m=>m.event==='video_source').length,0);
 });
