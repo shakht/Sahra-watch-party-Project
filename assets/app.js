@@ -29,7 +29,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // ── ─────────────────────────────────────────────────────────────────
 //  CONSTANTS
 // ── ─────────────────────────────────────────────────────────────────
-const DRIFT_THRESHOLD   = 2;    // seconds before we force-seek a peer
+const DRIFT_THRESHOLD   = 0.35; // Correct meaningful drift without constant micro-seeks.
 const SEEK_DEBOUNCE_MS  = 450;  // ms to wait before broadcasting seek
 const QUICK_EMOJIS      = ['🔥', '😂', '❤️', '👏', '😱'];
 
@@ -604,6 +604,46 @@ createApp({
 
     // YouTube IFrame Player instance (not reactive — plain JS object)
     let ytPlayer = null;
+    let ytReady = false;
+    let ytStableState = null;
+    let expectedYT = null;
+    let latestPlayback = null;
+    let playbackSequence = 0;
+    let receivedHost = null;
+    let receivedSequence = -1;
+    let hostClock = { id: null, offset: 0, rtt: Infinity };
+    let clockProbe = null;
+    let syncTicks = 0;
+
+    function mediaIdentity() {
+      return videoType.value === 'youtube' ? `youtube:${ytVideoId.value}` :
+        videoType.value === 'native' ? `native:${videoSrc.value.startsWith('blob:') ? 'local' : videoSrc.value}` : `iframe:${iframeSrc.value}`;
+    }
+
+    function validPlayback(cmd) {
+      return cmd && ['play', 'pause', 'seek'].includes(cmd.action) && Number.isFinite(cmd.ts) && cmd.ts >= 0;
+    }
+
+    function playbackPosition(cmd) {
+      // Only compare timestamps after measuring the offset to this host's clock.
+      const clockKnown = cmd.hostId === participantId || cmd.hostId === hostClock.id;
+      const now = Date.now() + (cmd.hostId === participantId ? 0 : hostClock.offset);
+      const age = clockKnown && Number.isFinite(cmd.sentAt) ? Math.max(0, (now - cmd.sentAt) / 1000) : 0;
+      return cmd.ts + (cmd.action === 'play' ? age * (cmd.rate || 1) : 0);
+    }
+
+    function requestClock() {
+      if (isHost.value) return;
+      clockProbe = Date.now();
+      emit('sync_ping', { from: participantId, sentAt: clockProbe });
+    }
+
+    function submitYouTubeControl(action) {
+      if (!ytReady || connStatus.value !== 'connected') return;
+      const cmd = { action, ts: ytPlayer.getCurrentTime(), media: mediaIdentity() };
+      if (isHost.value) emit('playback_control', cmd);
+      else emit('playback_request', cmd);
+    }
 
     // Prevents our own video event handlers from re-broadcasting
     // when we programmatically apply a remote command
@@ -859,7 +899,16 @@ createApp({
 
       // ── Broadcast: playback_control ──────────────────────
       channel.on('broadcast', { event: 'playback_control' }, ({ payload }) => {
-        if (isHost.value || !payload || !['play', 'pause', 'seek'].includes(payload.action) || !Number.isFinite(payload.ts) || payload.ts < 0) return;
+        if (isHost.value || !validPlayback(payload)) return;
+        if (payload.media && payload.media !== mediaIdentity()) {
+          emit('request_state', { from: nickname.value });
+          return;
+        }
+        if (payload.hostId && Number.isFinite(payload.sequence)) {
+          if (receivedHost === payload.hostId && payload.sequence <= receivedSequence) return;
+          if (receivedHost !== payload.hostId) { receivedHost = payload.hostId; requestClock(); }
+          receivedSequence = payload.sequence;
+        }
         // If we have no video loaded yet, ask host to resend the full state
         // instead of applying a timestamp to nothing.
         const hasVideo = videoSrc.value || ytVideoId.value || iframeSrc.value;
@@ -870,13 +919,39 @@ createApp({
         applyRemote(payload);
       });
 
+      // All viewers can play/pause; one host serializes commands for the room.
+      channel.on('broadcast', { event: 'playback_request' }, ({ payload }) => {
+        if (!isHost.value || videoType.value !== 'youtube' || !validPlayback(payload) ||
+          !['play', 'pause'].includes(payload.action) || payload.media !== mediaIdentity()) return;
+        const cmd = { action: payload.action, ts: payload.ts, media: mediaIdentity() };
+        // Stamp and broadcast first, then apply exactly the same room state locally.
+        emit('playback_control', cmd);
+        applyRemote(latestPlayback);
+      });
+
+      channel.on('broadcast', { event: 'sync_ping' }, ({ payload }) => {
+        if (isHost.value && payload && Number.isFinite(payload.sentAt)) {
+          emit('sync_pong', { to: payload.from, echo: payload.sentAt, hostNow: Date.now(), hostId: participantId });
+        }
+      });
+      channel.on('broadcast', { event: 'sync_pong' }, ({ payload }) => {
+        if (isHost.value || !payload || payload.to !== participantId || payload.echo !== clockProbe || !Number.isFinite(payload.hostNow)) return;
+        const now = Date.now();
+        const rtt = now - payload.echo;
+        if (rtt < 0 || rtt > 10000) return;
+        if (hostClock.id !== payload.hostId || rtt <= hostClock.rtt) {
+          hostClock = { id: payload.hostId, offset: payload.hostNow - (payload.echo + now) / 2, rtt };
+          if (latestPlayback?.hostId === payload.hostId) applyRemote(latestPlayback);
+        }
+      });
+
       // ── Broadcast: request_state ──────────────────────────
       // A peer is asking the host to re-broadcast the current state
       // (happens when they receive a playback_control but have no video yet)
       channel.on('broadcast', { event: 'request_state' }, ({ payload }) => {
         if (!isHost.value) return;
         sysMsg(`↩ Re-syncing state to ${payload?.from ?? 'peer'}…`);
-        setTimeout(broadcastCurrentState, 400);
+        broadcastCurrentState();
       });
 
       // ── Broadcast: host_takeover ────────────────────────────
@@ -969,11 +1044,17 @@ createApp({
           connStatus.value = 'connected';
           // Schedule a keep-alive ping every 3 days to prevent auto-pausing
           await channel.track(presenceProfile());
-          if (!isHost.value) emit('request_state', { from: nickname.value });
+          if (!isHost.value) {
+            requestClock();
+            emit('request_state', { from: nickname.value });
+          } else broadcastCurrentState();
           clearInterval(syncTimer);
+          syncTicks = 0;
           syncTimer = setInterval(() => {
-            if (connStatus.value === 'connected' && isHost.value) broadcastCurrentState();
-          }, 10000);
+            if (connStatus.value !== 'connected') return;
+            if (isHost.value) broadcastCurrentState();
+            else if (++syncTicks <= 3 || syncTicks % 15 === 0) requestClock();
+          }, 2000);
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           connStatus.value = 'disconnected';
           sysMsg('⚠ Connection lost — retrying…');
@@ -986,6 +1067,12 @@ createApp({
     async function teardown() {
       clearInterval(syncTimer);
       clearTimeout(seekTimer);
+      expectedYT = null;
+      latestPlayback = null;
+      pendingRemoteCmd = null;
+      receivedHost = null;
+      receivedSequence = -1;
+      hostClock = { id: null, offset: 0, rtt: Infinity };
       connStatus.value = 'disconnected';
       onlineUsers.value = [];
       if (channel) {
@@ -1086,9 +1173,12 @@ createApp({
       if (videoType.value === 'youtube' && ytVideoId.value) {
         // ── YouTube ──────────────────────────────────────────
         emit('video_source', { type: 'youtube', id: ytVideoId.value });
-        if (ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
+        if (ytReady && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
           const state  = ytPlayer.getPlayerState();
+          // Buffering is not a user pause. Wait for a stable player state.
+          if (state !== YT.PlayerState.PLAYING && state !== YT.PlayerState.PAUSED && state !== YT.PlayerState.CUED && state !== YT.PlayerState.ENDED) return;
           const action = state === YT.PlayerState.PLAYING ? 'play' : 'pause';
+          if (expectedYT && Date.now() < expectedYT.until) return;
           emit('playback_control', { action, ts: ytPlayer.getCurrentTime() });
         }
 
@@ -1135,7 +1225,10 @@ createApp({
      */
     function unmutePeer() {
       needsUnmute.value = false;
-      if (vjsPlayer) vjsPlayer.muted(false);
+      if (videoType.value === 'youtube' && ytReady) {
+        ytPlayer.unMute();
+        if (latestPlayback) applyRemote(latestPlayback);
+      } else if (vjsPlayer) vjsPlayer.muted(false);
     }
 
     // ── Apply a remote playback command received from the Host ──
@@ -1149,9 +1242,12 @@ createApp({
     // Fix: store the command in pendingRemoteCmd. initVideoJsPlayer() drains
     // it the moment the player is ready.
     function applyRemote(cmd) {
-      const { action, ts } = cmd;
+      if (!validPlayback(cmd)) return;
+      latestPlayback = cmd;
+      const { action } = cmd;
+      const ts = playbackPosition(cmd);
       if (videoType.value === 'iframe') return;
-      if (videoType.value === 'youtube' && (!ytPlayer || typeof ytPlayer.getPlayerState !== 'function')) {
+      if (videoType.value === 'youtube' && (!ytReady || !ytPlayer || typeof ytPlayer.getPlayerState !== 'function')) {
         pendingRemoteCmd = cmd;
         return;
       }
@@ -1163,22 +1259,18 @@ createApp({
       if (videoType.value === 'youtube' && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
         // ── YouTube sync ──────────────────────────────────────
         flashSync();
-        remoteApply = true;
-
         const currentT = ytPlayer.getCurrentTime?.() ?? 0;
         const drift    = Math.abs(currentT - ts);
-
-        if (action === 'play') {
-          if (drift > DRIFT_THRESHOLD) ytPlayer.seekTo(ts, true);
-          ytPlayer.playVideo();
-        } else if (action === 'pause') {
-          if (drift > DRIFT_THRESHOLD) ytPlayer.seekTo(ts, true);
-          ytPlayer.pauseVideo();
-        } else if (action === 'seek') {
+        const desired = action === 'play' ? YT.PlayerState.PLAYING : action === 'pause' ? YT.PlayerState.PAUSED : ytPlayer.getPlayerState();
+        const shouldSeek = action === 'seek' || drift > (action === 'pause' ? 0.08 : DRIFT_THRESHOLD);
+        const shouldChangeState = ytPlayer.getPlayerState() !== desired;
+        if (shouldSeek || shouldChangeState) expectedYT = { state: desired, until: Date.now() + 8000 };
+        if (shouldSeek) {
           ytPlayer.seekTo(ts, true);
         }
-
-        setTimeout(() => { remoteApply = false; }, 650);
+        if (action === 'play' && shouldChangeState) ytPlayer.playVideo();
+        else if (action === 'pause' && (shouldChangeState || shouldSeek)) ytPlayer.pauseVideo();
+        if (cmd.rate && ytPlayer.getPlaybackRate?.() !== cmd.rate) ytPlayer.setPlaybackRate?.(cmd.rate);
 
       } else {
         // ── Video.js sync ─────────────────────────────────────
@@ -1435,6 +1527,11 @@ createApp({
       } finally { remoteApply = false; }
 
       const parsed = parseVideoUrl(u);
+      if (mediaIdentity() !== (parsed.type === 'youtube' ? `youtube:${parsed.id}` : `native:${u}`)) {
+        latestPlayback = null;
+        expectedYT = null;
+        ytStableState = null;
+      }
       if (vjsPlayer) vjsPlayer.el().style.display = parsed.type === 'youtube' || !isDirectMediaUrl(u) ? 'none' : '';
 
       if (parsed.type === 'youtube') {
@@ -1534,8 +1631,8 @@ createApp({
       await nextTick();
 
       // Reuse existing player — just swap the video
-      if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
-        ytPlayer.loadVideoById(videoId);
+      if (ytReady && ytPlayer && typeof ytPlayer.cueVideoById === 'function') {
+        ytPlayer.cueVideoById(videoId);
         return;
       }
 
@@ -1549,10 +1646,13 @@ createApp({
           modestbranding:  1,   // minimal YouTube branding
           controls:        1,   // show native YouTube controls
           autoplay:        0,
+          playsinline:     1,
         },
         events: {
           onReady() {
-            toast('YouTube ready — Host controls playback for everyone');
+            ytReady = true;
+            if (!isHost.value) { ytPlayer.mute(); needsUnmute.value = true; }
+            toast('YouTube ready — play and pause are shared with the room');
             if (pendingRemoteCmd) {
               const cmd = pendingRemoteCmd;
               pendingRemoteCmd = null;
@@ -1561,25 +1661,29 @@ createApp({
             if (!isHost.value) emit('request_state', { from: nickname.value });
           },
           onError() { mediaError.value = t('mediaFailed'); },
+          onAutoplayBlocked() { needsUnmute.value = true; },
           onStateChange(event) {
-            // Only the Host broadcasts state changes
-            if (!isHost.value || remoteApply) return;
+            if (!ytReady || videoType.value !== 'youtube') return;
             const S = window.YT.PlayerState;
-            if (event.data === S.PLAYING) {
-              // Debounce — YouTube fires PLAYING right after a seek too
-              clearTimeout(seekTimer);
-              seekTimer = setTimeout(() => {
-                emit('playback_control', {
-                  action: 'play',
-                  ts: ytPlayer.getCurrentTime(),
-                });
-              }, 300);
-            } else if (event.data === S.PAUSED) {
-              emit('playback_control', {
-                action: 'pause',
-                ts: ytPlayer.getCurrentTime(),
-              });
+            if (![S.PLAYING, S.PAUSED, S.ENDED].includes(event.data)) return;
+            const previous = ytStableState;
+            ytStableState = event.data;
+            // Consume the event caused by our API command, even if buffering took seconds.
+            if (expectedYT && expectedYT.state === event.data) {
+              expectedYT = null;
+              if (event.data === S.PLAYING && latestPlayback) applyRemote(latestPlayback);
+              return;
             }
+            expectedYT = null;
+            if (remoteSourceApply || remoteApply) return;
+            if (event.data === S.ENDED) { if (isHost.value) submitYouTubeControl('pause'); return; }
+            // A viewer resuming after buffering follows the advancing room timeline.
+            if (!isHost.value && previous === S.PLAYING && event.data === S.PLAYING && latestPlayback?.action === 'play') {
+              applyRemote(latestPlayback);
+              return;
+            }
+            if (previous === event.data && !isHost.value) return;
+            submitYouTubeControl(event.data === S.PLAYING ? 'play' : 'pause');
           },
         },
       });
@@ -1809,7 +1913,12 @@ createApp({
     //  SUPABASE EMIT HELPER
     // ════════════════════════════════════════════════════════
     function emit(event, payload) {
-      if (!channel || isDemoMode()) return;
+      if (!channel || isDemoMode() || connStatus.value !== 'connected') return;
+      if (event === 'playback_control') {
+        payload = { ...payload, sentAt: Date.now(), hostId: participantId, sequence: ++playbackSequence,
+          media: mediaIdentity(), rate: videoType.value === 'youtube' ? (ytPlayer?.getPlaybackRate?.() || 1) : 1 };
+        latestPlayback = payload;
+      }
       channel.send({ type: 'broadcast', event, payload }).catch(console.error);
     }
 

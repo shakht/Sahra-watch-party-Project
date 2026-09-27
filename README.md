@@ -22,7 +22,9 @@ GitHub Pages can serve these files directly. Publish `index.html` **and the `ass
 
 First-time visitors choose a name before creating or joining a room. The name is stored in this browser's `localStorage` as `sahra_nick`, including names saved by the previous version. Returning visitors skip this step. Use **Change name** on the welcome screen or in the room; connected participants receive the new name through Presence. Storage is per browser and site, not a cross-device account; clearing site data removes it. If browser storage is blocked, the app still works for the current visit.
 
-Each connection has a unique participant ID so friends with identical names remain separate. Host claims use a timestamp and participant-ID tie-breaker to reconcile simultaneous claims and reconnects. Hosts send a state refresh every ten seconds; viewers request current state after reconnecting. This is cooperative client-side host management, not server-enforced access control. Anyone with a room link can join and claim host.
+Each connection has a unique participant ID so friends with identical names remain separate. Host claims use a timestamp and participant-ID tie-breaker to reconcile simultaneous claims and reconnects. Hosts send a state refresh every two seconds; viewers request current state after reconnecting. This is cooperative client-side host management, not server-enforced access control. Anyone with a room link can join and claim host.
+
+For YouTube, anyone can play or pause. Viewers send a request to the host, which orders and broadcasts the change to everyone. Commands include a sequence number, source identity, playback rate, and host timestamp. Clock probes compensate for different device clocks and transport delay. Viewers correct drift above 350 ms, align paused positions more tightly, and catch up after buffering. This is a correction threshold, not a guaranteed maximum error: YouTube buffering, ads, browser autoplay restrictions, and network conditions can still cause temporary differences. On mobile, tap the unmute button to enable sound. Native files remain host-controlled.
 
 ## Watching and chatting
 

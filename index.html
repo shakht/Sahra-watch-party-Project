@@ -266,7 +266,7 @@
            Clicking it also primes the browser for future unmuted play() calls. -->
       <button
         class="unmute-badge"
-        v-if="!isHost && videoType === 'native' && videoSrc && needsUnmute"
+        v-if="(videoType === 'native' || videoType === 'youtube') && needsUnmute"
         @click="unmutePeer"
         :title="t('tapToUnmute')"
       >
