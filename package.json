@@ -1,0 +1,9 @@
+{
+  "name": "sahra-watch-party",
+  "private": true,
+  "scripts": {
+    "start": "node scripts/serve.cjs",
+    "test": "node --test tests/*.test.cjs",
+    "check": "node --check assets/app.js"
+  }
+}
