@@ -390,3 +390,17 @@ test('Pusher and Supabase duplicate playback requests apply only once', async()=
  assert.equal(pusherSent.filter(m=>m.e==='playback_control').at(-1).p._syncId,primary._syncId);
  assert.equal(h.yt.getCurrentTime(),12);
 });
+
+test('bookmarklet import offers validated qualities without backend requests',async()=>{
+ const h=await harness({name:'Host',fetchImpl:async()=>{throw Error('No backend request allowed');}});
+ await h.app.chooseModeCreate();
+ h.app.urlInput.value='SAHRA1:'+JSON.stringify({title:'Movie',videos:[{url:'https://cloud02.albox.co/episodes/a.mp4',quality:'720p'},{url:'https://evil.test/a.mp4'}],subtitles:[{url:'https://cloud02.albox.co/episodes/a.vtt',language:'ar'}]});
+ await h.app.loadVideo();assert.equal(h.app.mediaError.value,'');assert.equal(h.app.resolvedMedia.value.videos.length,1);
+ await h.app.loadResolvedVideo(h.app.resolvedMedia.value.videos[0]);assert.equal(h.app.videoTitle.value,'Movie');assert.equal(h.player.remoteTextTracks()[0].srclang,'ar');
+});
+test('bookmarklet import rejects malformed or unsafe movie data',async()=>{
+ const h=await harness({name:'Host'});await h.app.chooseModeCreate();
+ for(const input of ['SAHRA1:{','SAHRA1:'+JSON.stringify({videos:[{url:'https://cloud02.albox.co.evil.test/a.mp4'}]})]){
+ h.app.urlInput.value=input;await h.app.loadVideo();assert.ok(h.app.mediaError.value);assert.equal(h.app.resolvedMedia.value,null);
+ }
+});

@@ -1616,7 +1616,7 @@ createApp({
       try {
         await loadVideoSource(details);
         saveRoomPlayback();
-        if (!mediaError.value && !new URL(urlInput.value).hostname.endsWith('cinema.albox.co')) closeControls();
+        if (!mediaError.value && !urlInput.value.startsWith('SAHRA1:') && !new URL(urlInput.value).hostname.endsWith('cinema.albox.co')) closeControls();
       }
       catch (error) {
         console.warn('Media load failed', error);
@@ -1628,6 +1628,24 @@ createApp({
       const u = urlInput.value.trim();
       if (!u) return;
       mediaError.value = '';
+      if (u.startsWith('SAHRA1:')) {
+        try {
+          if (u.length > 24000) throw Error();
+          const data = JSON.parse(u.slice(7));
+          const safe = (value, ext) => {
+            try { const parsed = new URL(value); return parsed.protocol === 'https:' &&
+              /^cloud\d+\.albox\.co$/.test(parsed.hostname) && !parsed.username && !parsed.password && !parsed.port && parsed.pathname.endsWith(ext); }
+            catch { return false; }
+          };
+          const videos = (Array.isArray(data.videos) ? data.videos : []).slice(0,10)
+            .filter(v => safe(v?.url, '.mp4')).map(v => ({ url: v.url, quality: String(v.quality || 'Video').slice(0,20) }));
+          const subtitles = (Array.isArray(data.subtitles) ? data.subtitles : []).slice(0,20)
+            .filter(t => safe(t?.url, '.vtt')).map(t => ({ url: t.url, language: String(t.language || 'ar').slice(0,10) }));
+          if (!videos.length) throw Error();
+          resolvedMedia.value = { title: String(data.title || 'Albox movie').slice(0,200), videos, subtitles };
+        } catch { resolvedMedia.value = null; mediaError.value = lang.value === 'ar' ? 'بيانات الفيلم غير صالحة. انسخها مجدداً من أداة سهرة.' : 'Invalid movie details. Copy them again using Send to Sahra.'; }
+        return;
+      }
       try {
         const url = new URL(u);
         if (!['https:', 'blob:'].includes(url.protocol)) throw new Error('Invalid protocol');
