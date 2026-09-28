@@ -920,6 +920,23 @@ createApp({
     // ════════════════════════════════════════════════════════
     //  SUPABASE CHANNEL — single channel per room
     // ════════════════════════════════════════════════════════
+    let pusherSync = null;
+    const playbackHandlers = new Map();
+    const seenSyncEvents = new Set();
+    const dualEvents = new Set(['playback_control', 'playback_request', 'sync_ping', 'sync_pong']);
+    function receivePlayback(event, payload) {
+      if (payload?._syncId) {
+        const id = event + ':' + payload._syncId;
+        if (seenSyncEvents.has(id)) return;
+        seenSyncEvents.add(id);
+        if (seenSyncEvents.size > 2048) seenSyncEvents.delete(seenSyncEvents.values().next().value);
+      }
+      playbackHandlers.get(event)?.({ payload });
+    }
+    function onPlayback(event, handler) {
+      playbackHandlers.set(event, handler);
+      channel.on('broadcast', { event }, ({ payload }) => receivePlayback(event, payload));
+    }
     async function joinChannel() {
       connStatus.value = 'connecting';
 
@@ -975,7 +992,7 @@ createApp({
       });
 
       // ── Broadcast: playback_control ──────────────────────
-      channel.on('broadcast', { event: 'playback_control' }, ({ payload }) => {
+      onPlayback('playback_control', ({ payload }) => {
         if (isHost.value || !validPlayback(payload)) return;
         if (payload.media && payload.media !== mediaIdentity()) {
           emit('request_state', { from: nickname.value });
@@ -997,7 +1014,7 @@ createApp({
       });
 
       // All viewers can play/pause; one host serializes commands for the room.
-      channel.on('broadcast', { event: 'playback_request' }, ({ payload }) => {
+      onPlayback('playback_request', ({ payload }) => {
         if (!isHost.value || videoType.value !== 'youtube' || !validPlayback(payload) ||
           !['play', 'pause'].includes(payload.action) || payload.media !== mediaIdentity()) return;
         const cmd = { action: payload.action, ts: payload.ts, media: mediaIdentity() };
@@ -1006,12 +1023,12 @@ createApp({
         applyRemote(latestPlayback);
       });
 
-      channel.on('broadcast', { event: 'sync_ping' }, ({ payload }) => {
+      onPlayback('sync_ping', ({ payload }) => {
         if (isHost.value && payload && Number.isFinite(payload.sentAt)) {
           emit('sync_pong', { to: payload.from, echo: payload.sentAt, hostNow: Date.now(), hostId: participantId });
         }
       });
-      channel.on('broadcast', { event: 'sync_pong' }, ({ payload }) => {
+      onPlayback('sync_pong', ({ payload }) => {
         if (isHost.value || !payload || payload.to !== participantId || payload.echo !== clockProbe || !Number.isFinite(payload.hostNow)) return;
         const now = Date.now();
         const rtt = now - payload.echo;
@@ -1112,6 +1129,17 @@ createApp({
         sysMsg(`▶ Host loaded a ${typeLabel}`);
       });
 
+      const config = window.SAHRA_PUSHER;
+      if (config?.key && config?.cluster && window.SahraPusherSync) {
+        pusherSync?.close();
+        pusherSync = new window.SahraPusherSync({ ...config, room: roomId.value,
+          endpoint: SUPABASE_URL + '/functions/v1/pusher-auth',
+          headers: { Authorization: 'Bearer ' + SUPABASE_ANON_KEY, apikey: SUPABASE_ANON_KEY },
+          receive: receivePlayback,
+          ready: () => { requestClock(); emit('request_state', { from: nickname.value }); }
+        });
+      }
+
       // ── Subscribe then begin presence tracking ───────────
       await channel.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
@@ -1142,6 +1170,10 @@ createApp({
     }
 
     async function teardown() {
+      pusherSync?.close();
+      pusherSync = null;
+      playbackHandlers.clear();
+      seenSyncEvents.clear();
       clearInterval(syncTimer);
       clearTimeout(seekTimer);
       expectedYT = null;
@@ -2047,6 +2079,10 @@ createApp({
         payload = { ...payload, sentAt: Date.now(), hostId: participantId, sequence: ++playbackSequence,
           media: mediaIdentity(), rate: videoType.value === 'youtube' ? (ytPlayer?.getPlaybackRate?.() || 1) : 1 };
         latestPlayback = payload;
+      }
+      if (dualEvents.has(event)) {
+        payload = { ...payload, _syncId: uid() };
+        pusherSync?.send(event, payload);
       }
       channel.send({ type: 'broadcast', event, payload }).catch(console.error);
     }

@@ -1,2 +1,5 @@
 [functions.resolve-media]
 verify_jwt = true
+
+[functions.pusher-auth]
+verify_jwt = true

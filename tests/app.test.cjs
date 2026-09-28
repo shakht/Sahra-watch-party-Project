@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const { randomUUID } = require('node:crypto');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../assets/app.js'), 'utf8');
 
-async function harness({ name, room, blockedStorage = false, sessionData, nowMs, fetchImpl } = {}) {
+async function harness({ name, room, blockedStorage = false, sessionData, nowMs, fetchImpl, pusherFactory } = {}) {
   let now = nowMs ?? Date.now();
   class TestDate extends Date { static now() { return now; } }
   const data = new Map(name ? [['sahra_nick', name]] : []);
@@ -55,7 +55,7 @@ async function harness({ name, room, blockedStorage = false, sessionData, nowMs,
     console, URL, URLSearchParams, crypto: { randomUUID }, videojs, YT, Date: TestDate,
     AbortSignal, fetch: fetchImpl || (async () => ({ json: async () => ({}) })),
     localStorage: storage(data), sessionStorage: storage(session),
-    window: { location, YT, addEventListener(event, fn) { windowEvents.set(event, fn); }, history: { replaceState(_s, _t, url) { location.href = url; } } },
+    window: { SAHRA_PUSHER: pusherFactory ? { key: "test", cluster: "eu" } : null, SahraPusherSync: pusherFactory, location, YT, addEventListener(event, fn) { windowEvents.set(event, fn); }, history: { replaceState(_s, _t, url) { location.href = url; } } },
     document: { documentElement: {} }, navigator: {},
     setTimeout: () => ++timerId, clearTimeout() {},
     setInterval(fn) { const id = ++timerId; intervals.set(id, fn); return id; },
@@ -374,4 +374,19 @@ test('friends load resolved source metadata without calling resolver again',asyn
  for(let i=0;i<8;i++) await Promise.resolve();
  assert.equal(h.app.videoTitle.value,'Mutiny');assert.equal(h.player.remoteTextTracks()[0].srclang,'ar');
  assert.equal(h.sent.filter(m=>m.event==='video_source').length,0);
+});
+
+test('Pusher and Supabase duplicate playback requests apply only once', async()=>{
+ let transport; const pusherSent=[];
+ const h=await harness({name:'Host',pusherFactory:class{constructor(options){transport=options;}send(e,p){pusherSent.push({e,p});}close(){}}});
+ await h.app.chooseModeCreate();await h.status('SUBSCRIBED');
+ h.app.urlInput.value='https://www.youtube.com/watch?v=M7lc1UVf-VE';await h.app.loadVideo();h.ytReady();
+ const payload={action:'pause',ts:12,media:'youtube:M7lc1UVf-VE',_syncId:'request-1'};
+ const before=h.sent.filter(m=>m.event==='playback_control').length;
+ transport.receive('playback_request',payload);
+ h.handlers.get('broadcast:playback_request')({payload});
+ assert.equal(h.sent.filter(m=>m.event==='playback_control').length,before+1);
+ const primary=h.sent.filter(m=>m.event==='playback_control').at(-1).payload;
+ assert.equal(pusherSent.filter(m=>m.e==='playback_control').at(-1).p._syncId,primary._syncId);
+ assert.equal(h.yt.getCurrentTime(),12);
 });
